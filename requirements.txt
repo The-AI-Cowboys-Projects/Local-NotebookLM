@@ -13,3 +13,7 @@ elevenlabs
 anthropic
 gradio
 pydantic
+python-docx
+python-pptx
+beautifulsoup4
+trafilatura

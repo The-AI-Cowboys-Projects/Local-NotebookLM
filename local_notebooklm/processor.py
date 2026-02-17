@@ -7,7 +7,7 @@ from .steps.step3 import step3
 from .steps.step4 import step4
 
 def podcast_processor(
-    pdf_path,
+    input_path,
     config_path=None,
     format_type="summary",
     length="medium",
@@ -60,12 +60,12 @@ def podcast_processor(
             else:
                 system_prompts[step_name] = None
         
-        # Step 1: Process PDF
+        # Step 1: Extract and clean text
         if not skip_to or skip_to <= 1:
-            print("Step 1: Processing PDF...")
+            print("Step 1: Processing input document...")
             cleaned_text_file = step1(
                 client=small_text_client,
-                pdf_path=pdf_path,
+                input_path=input_path,
                 config=config,
                 output_dir=str(output_dirs["step1"]),
                 system_prompt=system_prompts["step1"]

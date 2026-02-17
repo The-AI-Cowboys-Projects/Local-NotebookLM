@@ -1,7 +1,7 @@
 from .helpers import SINGLE_SPEAKER_FORMATS, THREE_SPEAKER_FORMATS, FOUR_SPEAKER_FORMATS, FIVE_SPEAKER_FORMATS
 
 
-step1_prompt = """You are a world class text pre-processor, here is the raw data from a PDF, please parse and return it in a way that is crispy and usable to send to a {format_type} writer.
+step1_prompt = """You are a world class text pre-processor, here is the raw data from a document, please parse and return it in a way that is crispy and usable to send to a {format_type} writer.
 
 The raw data is messed up with new lines, Latex math and you will see fluff that we can remove completely. Basically take away any details that you think might be useless in a {format_type} author's transcript.
 

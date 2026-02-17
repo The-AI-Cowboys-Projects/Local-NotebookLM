@@ -1,7 +1,7 @@
 from local_notebooklm.processor import podcast_processor
 
 success, result = podcast_processor(
-    pdf_path="./examples/MoshiVis.pdf",
+    input_path="./examples/MoshiVis.pdf",
     config_path="config.json",
     format_type="summary",
     length="short",

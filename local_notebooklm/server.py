@@ -96,7 +96,7 @@ def process_podcast(
 ):
     try:
         success, result = podcast_processor(
-            pdf_path=pdf_path,
+            input_path=pdf_path,
             config_path=config_path,
             format_type=format_type,
             length=length,
@@ -207,7 +207,7 @@ async def generate_podcast(
     background_tasks.add_task(
         process_podcast,
         job_id=job_id,
-        pdf_path=pdf_path,
+        input_path=pdf_path,
         config_path=config_path,
         format_type=format_type,
         length=length,
@@ -296,4 +296,4 @@ async def root():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="127.0.0.1", port=8000)
