@@ -4,7 +4,13 @@ from openai import OpenAI, AzureOpenAI
 from anthropic import Anthropic
 from elevenlabs import save
 from google import genai
+import logging
 import time
+
+logger = logging.getLogger(__name__)
+
+MAX_RETRIES = 3
+RETRY_BASE_DELAY = 2  # seconds; doubles each attempt
 
 
 FormatType = Literal[
@@ -151,23 +157,12 @@ def set_provider(
         raise ValueError(f"Unsupported provider: {provider_name}")
 
 
-def generate_text(
-    client: Any = None,
-    messages: Optional[List[Dict]] = None,
-    model: str = "gpt-4o-mini",
-    max_tokens: int = 512,
-    temperature: float = 0.7
-) -> str:
-    if client is None:
-        raise ValueError("Client is required")
-    
-    if messages is None or not messages:
-        raise ValueError("Messages are required")
-    
+def _call_llm(client, messages, model, max_tokens, temperature) -> str:
+    """Single LLM call without retry. Returns raw response text."""
     if isinstance(client, genai.Client):
         system_message = None
         user_content = []
-        
+
         for message in messages:
             if message.get("role") == "system":
                 system_message = message.get("content", "")
@@ -175,8 +170,7 @@ def generate_text(
                 user_content.append({"role": "user", "parts": [message.get("content", "")]})
             elif message.get("role") == "assistant":
                 user_content.append({"role": "model", "parts": [message.get("content", "")]})
-        
-        # Generate content with Google's client
+
         response = client.generate_content(
             model=model,
             contents=user_content,
@@ -190,7 +184,7 @@ def generate_text(
     elif isinstance(client, Anthropic):
         system_message = ""
         anthropic_messages = []
-        
+
         for message in messages:
             if message.get("role") == "system":
                 system_message = message.get("content", "")
@@ -199,7 +193,7 @@ def generate_text(
                     "role": message.get("role"),
                     "content": message.get("content", "")
                 })
-        
+
         response = client.messages.create(
             model=model,
             max_tokens=max_tokens,
@@ -218,6 +212,42 @@ def generate_text(
         return response.choices[0].message.content
 
 
+def generate_text(
+    client: Any = None,
+    messages: Optional[List[Dict]] = None,
+    model: str = "gpt-4o-mini",
+    max_tokens: int = 512,
+    temperature: float = 0.7
+) -> str:
+    if client is None:
+        raise ValueError("Client is required")
+
+    if messages is None or not messages:
+        raise ValueError("Messages are required")
+
+    last_error = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            text = _call_llm(client, messages, model, max_tokens, temperature)
+
+            # Validate response is non-empty
+            if not text or not text.strip():
+                raise ValueError("LLM returned empty response")
+
+            return text
+
+        except Exception as e:
+            last_error = e
+            if attempt < MAX_RETRIES:
+                delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
+                logger.warning(f"generate_text attempt {attempt}/{MAX_RETRIES} failed: {e}. Retrying in {delay}s...")
+                time.sleep(delay)
+            else:
+                logger.error(f"generate_text failed after {MAX_RETRIES} attempts: {e}")
+
+    raise RuntimeError(f"generate_text failed after {MAX_RETRIES} attempts: {last_error}")
+
+
 def generate_speech(
     client: Any = None,
     text: str = None,
@@ -226,22 +256,36 @@ def generate_speech(
     response_format: str = "wav",
     output_path: str = "output"
 ):
-    if isinstance(client, ElevenLabs):
-        file_extension = response_format.split('_')[0].split('-')[0]
-        audio = client.text_to_speech.convert(
-            text=text,
-            voice_id=voice,
-            model_id=model_name,
-            output_format=response_format,
-        )
-        save(audio=audio, filename=str(f"{output_path}.{file_extension}"))
-    else:
-        with client.audio.speech.with_streaming_response.create(
-            model=model_name,
-            voice=voice,
-            input=text,
-            response_format=response_format
-        ) as response:
-            response.stream_to_file(str(f"{output_path}.{response_format}"))
-    
-    return f"{output_path}.{response_format}"
+    last_error = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            if isinstance(client, ElevenLabs):
+                file_extension = response_format.split('_')[0].split('-')[0]
+                audio = client.text_to_speech.convert(
+                    text=text,
+                    voice_id=voice,
+                    model_id=model_name,
+                    output_format=response_format,
+                )
+                save(audio=audio, filename=str(f"{output_path}.{file_extension}"))
+            else:
+                with client.audio.speech.with_streaming_response.create(
+                    model=model_name,
+                    voice=voice,
+                    input=text,
+                    response_format=response_format
+                ) as response:
+                    response.stream_to_file(str(f"{output_path}.{response_format}"))
+
+            return f"{output_path}.{response_format}"
+
+        except Exception as e:
+            last_error = e
+            if attempt < MAX_RETRIES:
+                delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
+                logger.warning(f"generate_speech attempt {attempt}/{MAX_RETRIES} failed: {e}. Retrying in {delay}s...")
+                time.sleep(delay)
+            else:
+                logger.error(f"generate_speech failed after {MAX_RETRIES} attempts: {e}")
+
+    raise RuntimeError(f"generate_speech failed after {MAX_RETRIES} attempts: {last_error}")

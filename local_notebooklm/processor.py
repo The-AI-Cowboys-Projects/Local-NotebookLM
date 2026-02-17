@@ -5,6 +5,7 @@ from .steps.step1 import step1
 from .steps.step2 import step2
 from .steps.step3 import step3
 from .steps.step4 import step4
+from .config import validate_config, ConfigValidationError
 
 def podcast_processor(
     input_path,
@@ -25,6 +26,12 @@ def podcast_processor(
     else:
         from local_notebooklm.config import base_config
         config = base_config
+
+    # Validate config before proceeding
+    try:
+        validate_config(config)
+    except ConfigValidationError as e:
+        return False, f"Invalid configuration: {e}"
     
     # Create output directories
     output_base = Path(output_dir)

@@ -2,12 +2,15 @@ from .helpers import generate_text, FormatType, wait_for_next_step
 from typing import Optional, List, Dict, Any
 from .prompts import step1_prompt
 from ..loaders import load_input, LoaderError
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging, os
 from pathlib import Path
 from tqdm import tqdm
 
 
 logger = logging.getLogger(__name__)
+
+MAX_WORKERS = 4  # parallel LLM calls for chunk cleaning
 
 class DocumentProcessingError(Exception):
     pass
@@ -49,8 +52,7 @@ def process_chunk(
         format_type
     ) -> str:
     try:
-        wait_for_next_step()
-        if system_prompt == None:
+        if system_prompt is None:
             system = step1_prompt.format(text_chunk=text_chunk, format_type=format_type)
         else:
             system = system_prompt
@@ -91,21 +93,66 @@ def step1(
         chunks = create_word_bounded_chunks(extracted_text, config["Step1"]["chunk_size"])
         output_file = output_dir / f"clean_{input_file.name}"
 
-        logger.info(f"Processing {len(chunks)} chunks")
+        num_chunks = len(chunks)
+        logger.info(f"Processing {num_chunks} chunks")
 
-        with open(output_file, 'w', encoding='utf-8') as out_file:
-            for chunk_num, chunk in enumerate(tqdm(chunks, desc="Processing chunks", disable=None)):
-                processed_chunk = process_chunk(
+        model_name = config["Small-Text-Model"]["model"]
+        max_tokens = config["Step1"]["max_tokens"]
+        temperature = config["Step1"]["temperature"]
+
+        if num_chunks <= 1:
+            # Single chunk — no need for thread pool overhead
+            results = {}
+            for i, chunk in enumerate(chunks):
+                results[i] = process_chunk(
                     client=client,
                     text_chunk=chunk,
-                    chunk_num=chunk_num,
+                    chunk_num=i,
                     format_type=format_type,
                     system_prompt=system_prompt,
-                    model_name=config["Small-Text-Model"]["model"],
-                    max_tokens=config["Step1"]["max_tokens"],
-                    temperature=config["Step1"]["temperature"]
+                    model_name=model_name,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
                 )
-                out_file.write(processed_chunk + "\n")
+        else:
+            # Parallel chunk processing — each chunk is independently cleaned
+            workers = min(MAX_WORKERS, num_chunks)
+            logger.info(f"Using {workers} parallel workers")
+            results = {}
+            errors = []
+
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                future_to_idx = {}
+                for i, chunk in enumerate(chunks):
+                    fut = pool.submit(
+                        process_chunk,
+                        client=client,
+                        text_chunk=chunk,
+                        chunk_num=i,
+                        format_type=format_type,
+                        system_prompt=system_prompt,
+                        model_name=model_name,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                    )
+                    future_to_idx[fut] = i
+
+                for fut in tqdm(as_completed(future_to_idx), total=num_chunks, desc="Processing chunks", disable=None):
+                    idx = future_to_idx[fut]
+                    try:
+                        results[idx] = fut.result()
+                    except Exception as e:
+                        errors.append(f"Chunk {idx}: {e}")
+
+            if errors:
+                raise ChunkProcessingError(
+                    f"{len(errors)} chunk(s) failed:\n  " + "\n  ".join(errors)
+                )
+
+        # Write results in original order
+        with open(output_file, 'w', encoding='utf-8') as out_file:
+            for i in range(num_chunks):
+                out_file.write(results[i] + "\n")
                 out_file.flush()
 
         logger.info("Processing complete")

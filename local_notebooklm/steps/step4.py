@@ -124,11 +124,13 @@ def step4(
 
             if speaker == "Speaker 1":
                 current_voice = host
+            elif speaker == "Speaker 2":
+                current_voice = co_host_1
             elif speaker == "Speaker 3":
                 current_voice = co_host_2
             elif speaker == "Speaker 4":
                 current_voice = co_host_3
-            elif speaker == "Speaker 3":
+            elif speaker == "Speaker 5":
                 current_voice = co_host_4
             else:
                 current_voice = co_host_1
