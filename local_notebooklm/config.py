@@ -112,5 +112,10 @@ base_config: Dict[str, Any] = {
     "Step3": {
         "max_tokens": 8126,
         "temperature": 1
+    },
+
+    "Step5": {
+        "max_tokens": 4096,
+        "temperature": 0.4
     }
 }

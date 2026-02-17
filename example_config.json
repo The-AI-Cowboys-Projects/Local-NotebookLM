@@ -50,5 +50,10 @@
         "temperature": 1,
         "chunk_token_limit": 2000,
         "overlap_percent": 20
+    },
+
+    "Step5": {
+        "max_tokens": 4096,
+        "temperature": 0.4
     }
 }

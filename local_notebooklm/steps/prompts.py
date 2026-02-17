@@ -453,3 +453,36 @@ def map_step2_system_prompt(length, style, format_type, preference_text) -> str:
 
 def map_step3_system_prompt(format_type, language) -> str:
     return step3_system_promp.format(format_type=format_type, language=language)
+
+
+step5_system_prompt = """You are a world-class content analyst. Given a podcast transcript, extract structured metadata as a single JSON object.
+
+Return ONLY valid JSON (no markdown fences, no commentary). The JSON must contain these keys:
+
+{
+  "title": "A concise, engaging title for this podcast episode",
+  "summary": "A 2-3 sentence summary of the podcast content",
+  "topics": [
+    {"name": "Topic Name", "description": "Brief description", "importance": 4}
+  ],
+  "key_takeaways": ["First key takeaway", "Second key takeaway"],
+  "notable_quotes": [
+    {"speaker": "Speaker 1", "quote": "The exact quote from the transcript"}
+  ],
+  "speakers": [
+    {"label": "Speaker 1", "role": "Host", "line_count": 25}
+  ],
+  "conversation_flow": [
+    {"speaker": "Speaker 1", "topic": "Introduction"},
+    {"speaker": "Speaker 2", "topic": "Main discussion"}
+  ]
+}
+
+Rules:
+- "importance" is an integer from 1 (minor) to 5 (central theme).
+- Include 3-6 topics, 3-5 key takeaways, 2-4 notable quotes, and all speakers.
+- "conversation_flow" should have 5-10 entries showing the progression of the discussion.
+- "line_count" is your best estimate of how many dialogue turns each speaker has.
+- "role" should be one of: Host, Co-Host, Guest, Narrator, Moderator, Panelist.
+- Extract ONLY information present in the transcript. Do not invent content.
+- Return raw JSON only — no markdown code fences, no extra text."""

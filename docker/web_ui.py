@@ -399,6 +399,8 @@ PIPELINE_HTML = """
     <div class="step"><span class="num">3</span> Prepare Data</div>
     <span class="arrow">&rarr;</span>
     <div class="step"><span class="num">4</span> Synthesize Audio</div>
+    <span class="arrow">&rarr;</span>
+    <div class="step"><span class="num">5</span> Infographic</div>
 </div>
 """
 
@@ -425,7 +427,7 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
     elif skip_to is not None and skip_to > 1:
         input_path = None  # skipping step 1, no input needed
     else:
-        return "Please upload a document or enter a URL.", None, "", "", ""
+        return "Please upload a document or enter a URL.", None, "", "", "", None, None, None
 
     if not output_dir:
         output_dir = "./local_notebooklm/web_ui/output"
@@ -434,7 +436,7 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
         os.makedirs(output_dir, exist_ok=True)
         print(f"Created output directory: {output_dir}")
     except Exception as e:
-        return f"Failed to create output directory: {str(e)}", None, "", "", ""
+        return f"Failed to create output directory: {str(e)}", None, "", "", "", None, None, None
 
     try:
         if config_file is None:
@@ -480,14 +482,41 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
                     except Exception as e:
                         file_contents[file] = f"Error reading file: {str(e)}"
 
-            return "Audio Generated Successfully!", audio_path, file_contents.get("step1/extracted_text.txt", ""), file_contents.get("step1/clean_extracted_text.txt", ""), file_contents.get("step3/podcast_ready_data.txt", "")
+            # Load infographic if available
+            infographic_html = None
+            infographic_file = None
+            infographic_path = os.path.join(output_dir, "step5", "infographic.html")
+            if os.path.exists(infographic_path):
+                try:
+                    with open(infographic_path, 'r', encoding='utf-8') as f:
+                        infographic_html = f'<iframe srcdoc="{f.read().replace(chr(34), "&quot;").replace(chr(10), "&#10;")}" style="width:100%;height:600px;border:1px solid #1e1e40;border-radius:8px;" sandbox="allow-same-origin"></iframe>'
+                    infographic_file = infographic_path
+                except Exception:
+                    pass
+
+            # Load PPTX if available
+            pptx_file = None
+            pptx_path = os.path.join(output_dir, "step5", "infographic.pptx")
+            if os.path.exists(pptx_path):
+                pptx_file = pptx_path
+
+            return (
+                "Audio Generated Successfully!",
+                audio_path,
+                file_contents.get("step1/extracted_text.txt", ""),
+                file_contents.get("step1/clean_extracted_text.txt", ""),
+                file_contents.get("step3/podcast_ready_data.txt", ""),
+                infographic_html,
+                infographic_file,
+                pptx_file,
+            )
         else:
-            return f"Failed to generate audio: {result}", None, "", "", ""
+            return f"Failed to generate audio: {result}", None, "", "", "", None, None, None
 
     except Exception as e:
         import traceback
         error_details = traceback.format_exc()
-        return f"An error occurred: {str(e)}\n\nDetails:\n{error_details}", None, "", "", ""
+        return f"An error occurred: {str(e)}\n\nDetails:\n{error_details}", None, "", "", "", None, None, None
 
 
 # ---------------------------------------------------------------------------
@@ -595,6 +624,12 @@ def create_gradio_ui():
                         elem_id="audio-player",
                     )
 
+                gr.HTML('<div class="cyber-card-label">// INFOGRAPHIC</div>')
+                with gr.Group(elem_classes="cyber-card"):
+                    infographic_preview = gr.HTML(label="Infographic Preview")
+                    infographic_download = gr.File(label="Download Infographic HTML")
+                    pptx_download = gr.File(label="Download PPTX Slide Deck")
+
                 gr.HTML('<div class="cyber-card-label">// PIPELINE DATA</div>')
                 with gr.Group(elem_classes="cyber-card"):
                     with gr.Accordion("View Extracted Text", open=False, elem_classes="cyber-accordion"):
@@ -613,7 +648,7 @@ def create_gradio_ui():
         generate_button.click(
             fn=process_podcast,
             inputs=[pdf_file, url_input, config_file, format_type, length, style, language, additional_preference, output_dir, skip_to],
-            outputs=[result_message, audio_output, extracted_text, clean_text, audio_script],
+            outputs=[result_message, audio_output, extracted_text, clean_text, audio_script, infographic_preview, infographic_download, pptx_download],
         )
 
     return app

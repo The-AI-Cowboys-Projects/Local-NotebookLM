@@ -78,6 +78,8 @@ class PodcastStatusResponse(BaseModel):
     status: str
     result: Optional[dict] = None
     audio_url: Optional[str] = None
+    infographic_url: Optional[str] = None
+    pptx_url: Optional[str] = None
 
 # Dictionary to store job statuses
 job_status = {}
@@ -110,22 +112,42 @@ def process_podcast(
             # Copy the final audio file to a persistent location
             audio_filename = f"{job_id}_podcast.wav"
             final_audio_path = os.path.join(output_dir, audio_filename)
-            
+
+            # Check for infographic
+            infographic_path = os.path.join(output_dir, "step5", "infographic.html")
+            infographic_url = None
+            if os.path.exists(infographic_path):
+                infographic_url = f"/download-infographic/{job_id}"
+
+            # Check for PPTX
+            pptx_path = os.path.join(output_dir, "step5", "infographic.pptx")
+            pptx_url = None
+            if os.path.exists(pptx_path):
+                pptx_url = f"/download-pptx/{job_id}"
+
             # Check if the audio file exists
             podcast_audio_path = os.path.join(output_dir, "step3/podcast.wav")
             if os.path.exists(podcast_audio_path):
                 shutil.copy(podcast_audio_path, final_audio_path)
                 job_status[job_id] = {
-                    "status": "completed", 
+                    "status": "completed",
                     "result": result,
                     "audio_path": final_audio_path,
-                    "audio_url": f"/download-podcast/{job_id}"
+                    "audio_url": f"/download-podcast/{job_id}",
+                    "infographic_path": infographic_path if infographic_url else None,
+                    "infographic_url": infographic_url,
+                    "pptx_path": pptx_path if pptx_url else None,
+                    "pptx_url": pptx_url,
                 }
             else:
                 job_status[job_id] = {
-                    "status": "completed", 
+                    "status": "completed",
                     "result": result,
-                    "error": "Audio file not found"
+                    "infographic_path": infographic_path if infographic_url else None,
+                    "infographic_url": infographic_url,
+                    "pptx_path": pptx_path if pptx_url else None,
+                    "pptx_url": pptx_url,
+                    "error": "Audio file not found",
                 }
         else:
             job_status[job_id] = {"status": "failed", "error": "Processing failed"}
@@ -234,7 +256,49 @@ async def get_job_status(job_id: str):
         job_id=job_id,
         status=job_info["status"],
         result=job_info.get("result"),
-        audio_url=job_info.get("audio_url")
+        audio_url=job_info.get("audio_url"),
+        infographic_url=job_info.get("infographic_url"),
+        pptx_url=job_info.get("pptx_url"),
+    )
+
+@app.get("/download-infographic/{job_id}")
+async def download_infographic(job_id: str):
+    if job_id not in job_status:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    job_info = job_status[job_id]
+
+    if job_info["status"] != "completed":
+        raise HTTPException(status_code=400, detail="Job is not completed yet")
+
+    infographic_path = job_info.get("infographic_path")
+    if not infographic_path or not os.path.exists(infographic_path):
+        raise HTTPException(status_code=404, detail="Infographic not found")
+
+    return FileResponse(
+        path=infographic_path,
+        filename=f"infographic_{job_id}.html",
+        media_type="text/html",
+    )
+
+@app.get("/download-pptx/{job_id}")
+async def download_pptx(job_id: str):
+    if job_id not in job_status:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    job_info = job_status[job_id]
+
+    if job_info["status"] != "completed":
+        raise HTTPException(status_code=400, detail="Job is not completed yet")
+
+    pptx_path = job_info.get("pptx_path")
+    if not pptx_path or not os.path.exists(pptx_path):
+        raise HTTPException(status_code=404, detail="PPTX not found")
+
+    return FileResponse(
+        path=pptx_path,
+        filename=f"infographic_{job_id}.pptx",
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
     )
 
 @app.get("/download-podcast/{job_id}")
@@ -290,6 +354,8 @@ async def root():
             {"path": "/generate-podcast/", "method": "POST", "description": "Generate a podcast from PDF"},
             {"path": "/job-status/{job_id}", "method": "GET", "description": "Check status of a job"},
             {"path": "/download-podcast/{job_id}", "method": "GET", "description": "Download the generated podcast audio file"},
+            {"path": "/download-infographic/{job_id}", "method": "GET", "description": "Download the generated infographic HTML"},
+            {"path": "/download-pptx/{job_id}", "method": "GET", "description": "Download the generated PPTX slide deck"},
             {"path": "/health", "method": "GET", "description": "API health check"}
         ]
     }
