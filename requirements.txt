@@ -19,3 +19,4 @@ beautifulsoup4
 trafilatura
 # Optional: pip install docling  (higher-quality PDF extraction with tables/layout/OCR)
 # Optional: pip install matplotlib  (chart generation for infographics)
+# Optional: pip install youtube-transcript-api  (YouTube video transcript extraction)

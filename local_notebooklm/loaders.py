@@ -5,13 +5,66 @@ Supports PDF, DOCX, PPTX, TXT, Markdown, and web URLs.
 
 import logging
 import os
+import re
 from pathlib import Path
+from urllib.parse import urlparse, parse_qs
 
 logger = logging.getLogger(__name__)
 
 
 class LoaderError(Exception):
     pass
+
+
+def _is_youtube_url(url: str) -> bool:
+    """Return True if *url* points to a YouTube video."""
+    return bool(
+        re.match(
+            r"https?://(?:www\.|m\.)?(?:youtube\.com/(?:watch|embed|v|shorts)/?"
+            r"|youtu\.be/)",
+            url,
+        )
+    )
+
+
+def _extract_youtube_video_id(url: str) -> str:
+    """Parse a YouTube video ID from any common URL format."""
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+
+    # youtu.be/<id>
+    if host in ("youtu.be", "www.youtu.be"):
+        video_id = parsed.path.lstrip("/").split("/")[0]
+        if video_id:
+            return video_id
+
+    # youtube.com/watch?v=<id>
+    if "v" in parse_qs(parsed.query):
+        return parse_qs(parsed.query)["v"][0]
+
+    # youtube.com/embed/<id>, /v/<id>, /shorts/<id>
+    parts = [p for p in parsed.path.split("/") if p]
+    if len(parts) >= 2 and parts[0] in ("embed", "v", "shorts"):
+        return parts[1]
+
+    raise ValueError(f"Could not extract video ID from URL: {url}")
+
+
+def _extract_youtube_transcript(video_id: str, max_chars: int = 100000) -> str:
+    """Fetch a YouTube transcript using youtube-transcript-api."""
+    from youtube_transcript_api import YouTubeTranscriptApi
+
+    ytt = YouTubeTranscriptApi()
+    try:
+        transcript = ytt.fetch(video_id, languages=["en"])
+    except Exception:
+        # Fall back to any available language
+        transcript = ytt.fetch(video_id)
+
+    text = " ".join(snippet.text for snippet in transcript)
+    text = text[:max_chars]
+    logger.info(f"YouTube transcript extraction complete. {len(text)} chars")
+    return text
 
 
 def _extract_pdf_with_docling(file_path: str, max_chars: int) -> str:
@@ -174,6 +227,16 @@ def extract_text_from_markdown(file_path: str, max_chars: int = 100000) -> str:
 
 
 def extract_text_from_url(url: str, max_chars: int = 100000) -> str:
+    # YouTube detection — extract transcript instead of scraping HTML
+    if _is_youtube_url(url):
+        try:
+            video_id = _extract_youtube_video_id(url)
+            return _extract_youtube_transcript(video_id, max_chars)
+        except ImportError:
+            logger.info("youtube-transcript-api not installed, falling back to web scraping")
+        except Exception as e:
+            logger.warning(f"YouTube transcript extraction failed, falling back to web scraping: {e}")
+
     # Try trafilatura first (best article extraction)
     try:
         import trafilatura

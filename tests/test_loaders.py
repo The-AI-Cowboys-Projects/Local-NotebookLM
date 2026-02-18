@@ -12,6 +12,8 @@ from local_notebooklm.loaders import (
     extract_text_from_txt,
     extract_text_from_markdown,
     extract_text_from_url,
+    _is_youtube_url,
+    _extract_youtube_video_id,
     LoaderError,
 )
 
@@ -200,6 +202,155 @@ class TestUrlLoader:
         with patch("local_notebooklm.loaders.extract_text_from_url", return_value="x" * 100):
             text = load_input("https://example.com", max_chars=100)
             assert len(text) <= 100
+
+
+# ── YouTube URL Detection Tests ─────────────────────────────────────
+
+
+class TestYouTubeUrlDetection:
+    """Tests for _is_youtube_url and _extract_youtube_video_id."""
+
+    # -- _is_youtube_url positive cases --
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://youtube.com/watch?v=dQw4w9WgXcQ",
+            "http://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://youtu.be/dQw4w9WgXcQ",
+            "https://www.youtube.com/embed/dQw4w9WgXcQ",
+            "https://www.youtube.com/v/dQw4w9WgXcQ",
+            "https://www.youtube.com/shorts/dQw4w9WgXcQ",
+        ],
+    )
+    def test_is_youtube_url_positive(self, url):
+        assert _is_youtube_url(url) is True
+
+    # -- _is_youtube_url negative cases --
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://example.com/watch?v=abc",
+            "https://vimeo.com/12345",
+            "https://www.youtube.com/channel/UCabc123",
+            "https://www.youtube.com/playlist?list=PLabc",
+            "https://www.youtube.com/",
+        ],
+    )
+    def test_is_youtube_url_negative(self, url):
+        assert _is_youtube_url(url) is False
+
+    # -- _extract_youtube_video_id --
+
+    @pytest.mark.parametrize(
+        "url, expected_id",
+        [
+            ("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "dQw4w9WgXcQ"),
+            ("https://youtu.be/dQw4w9WgXcQ", "dQw4w9WgXcQ"),
+            ("https://www.youtube.com/embed/dQw4w9WgXcQ", "dQw4w9WgXcQ"),
+            ("https://www.youtube.com/v/dQw4w9WgXcQ", "dQw4w9WgXcQ"),
+            ("https://www.youtube.com/shorts/dQw4w9WgXcQ", "dQw4w9WgXcQ"),
+            ("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=120", "dQw4w9WgXcQ"),
+            ("https://youtu.be/dQw4w9WgXcQ?t=30", "dQw4w9WgXcQ"),
+        ],
+    )
+    def test_extract_video_id(self, url, expected_id):
+        assert _extract_youtube_video_id(url) == expected_id
+
+    def test_extract_video_id_invalid_url(self):
+        with pytest.raises(ValueError, match="Could not extract video ID"):
+            _extract_youtube_video_id("https://www.youtube.com/")
+
+
+# ── YouTube Transcript Loader Tests ────────────────────────────────
+
+
+class TestYouTubeTranscriptLoader:
+    """Tests for YouTube transcript extraction via extract_text_from_url."""
+
+    def test_youtube_url_uses_transcript(self):
+        """YouTube URL should use transcript when available."""
+        with patch(
+            "local_notebooklm.loaders._extract_youtube_transcript",
+            return_value="Hello this is a transcript",
+        ) as mock_yt:
+            text = extract_text_from_url("https://www.youtube.com/watch?v=abc123")
+            assert text == "Hello this is a transcript"
+            mock_yt.assert_called_once_with("abc123", 100000)
+
+    def test_falls_back_on_import_error(self):
+        """Missing youtube-transcript-api should fall back to web scraping."""
+        with patch(
+            "local_notebooklm.loaders._extract_youtube_transcript",
+            side_effect=ImportError("No module named 'youtube_transcript_api'"),
+        ):
+            with patch(
+                "local_notebooklm.loaders.extract_text_from_url",
+                wraps=extract_text_from_url,
+            ):
+                # Patch trafilatura to succeed as the fallback
+                mock_traf = MagicMock()
+                mock_traf.fetch_url.return_value = "<html>fallback</html>"
+                mock_traf.extract.return_value = "Fallback article content"
+                with patch.dict("sys.modules", {"trafilatura": mock_traf}):
+                    text = extract_text_from_url("https://www.youtube.com/watch?v=abc123")
+                    assert text == "Fallback article content"
+
+    def test_falls_back_on_runtime_error(self):
+        """Failed transcript fetch should fall back to web scraping."""
+        with patch(
+            "local_notebooklm.loaders._extract_youtube_transcript",
+            side_effect=RuntimeError("No transcript available"),
+        ):
+            mock_traf = MagicMock()
+            mock_traf.fetch_url.return_value = "<html>fallback</html>"
+            mock_traf.extract.return_value = "Scraped content"
+            with patch.dict("sys.modules", {"trafilatura": mock_traf}):
+                text = extract_text_from_url("https://www.youtube.com/watch?v=abc123")
+                assert text == "Scraped content"
+
+    def test_youtu_be_short_url(self):
+        """youtu.be short URLs should route through YouTube extraction."""
+        with patch(
+            "local_notebooklm.loaders._extract_youtube_transcript",
+            return_value="Short URL transcript",
+        ) as mock_yt:
+            text = extract_text_from_url("https://youtu.be/xyz789")
+            assert text == "Short URL transcript"
+            mock_yt.assert_called_once_with("xyz789", 100000)
+
+    def test_non_youtube_url_skips_youtube_path(self):
+        """Non-YouTube URLs should not attempt YouTube transcript extraction."""
+        with patch(
+            "local_notebooklm.loaders._extract_youtube_transcript",
+        ) as mock_yt:
+            mock_traf = MagicMock()
+            mock_traf.fetch_url.return_value = "<html>article</html>"
+            mock_traf.extract.return_value = "Regular article"
+            with patch.dict("sys.modules", {"trafilatura": mock_traf}):
+                text = extract_text_from_url("https://example.com/article")
+                assert text == "Regular article"
+                mock_yt.assert_not_called()
+
+    def test_youtube_url_via_dispatcher(self):
+        """load_input routes YouTube URLs through extract_text_from_url."""
+        with patch(
+            "local_notebooklm.loaders._extract_youtube_transcript",
+            return_value="Dispatched transcript",
+        ):
+            text = load_input("https://www.youtube.com/watch?v=test123")
+            assert text == "Dispatched transcript"
+
+    def test_youtube_transcript_max_chars(self):
+        """YouTube transcript should respect max_chars."""
+        with patch(
+            "local_notebooklm.loaders._extract_youtube_transcript",
+            return_value="A" * 50,
+        ):
+            text = extract_text_from_url("https://www.youtube.com/watch?v=abc", max_chars=50)
+            assert len(text) <= 50
 
 
 # ── Dispatcher Tests ────────────────────────────────────────────────
