@@ -17,7 +17,8 @@ def podcast_processor(
     preference="nothing",
     output_dir="./output",
     skip_to: int = None,
-    language: str = "english"
+    language: str = "english",
+    outputs: list = None,
 ):
     # Load config
     if config_path:
@@ -132,8 +133,15 @@ def podcast_processor(
         else:
             print("Skipping Step 3, assuming files exist in output directory...")
         
+        # Determine which outputs to produce
+        want_audio = outputs is None or "Podcast Audio" in outputs
+        want_html = outputs is None or "Infographic HTML" in outputs
+        want_png = outputs is None or "Infographic PNG" in outputs
+        want_pptx = outputs is None or "PPTX Slides" in outputs
+        want_any_infographic = want_html or want_png or want_pptx
+
         # Step 4: Generate audio
-        if not skip_to or skip_to <= 4:
+        if want_audio and (not skip_to or skip_to <= 4):
             print("Step 4: Generating audio...")
             final_audio_path = step4(
                 client=tts_client,
@@ -147,14 +155,17 @@ def podcast_processor(
             final_audio_path = None
 
         # Step 5: Generate infographic (non-fatal)
-        if not skip_to or skip_to <= 5:
+        if want_any_infographic and (not skip_to or skip_to <= 5):
             try:
                 print("Step 5: Generating infographic...")
                 step5(
                     client=big_text_client,
                     config=config,
                     input_dir=str(output_dirs["step3"]),
-                    output_dir=str(output_dirs["step5"])
+                    output_dir=str(output_dirs["step5"]),
+                    generate_html=want_html,
+                    generate_png=want_png,
+                    generate_pptx=want_pptx,
                 )
                 print("Infographic generated successfully!")
             except Exception as e:

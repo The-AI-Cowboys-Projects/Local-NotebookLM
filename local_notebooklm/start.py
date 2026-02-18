@@ -9,7 +9,7 @@ def main():
     parser.add_argument("--input", type=str, required=True, help="Path to input file (PDF, DOCX, PPTX, TXT, MD) or URL")
     
     # Optional arguments
-    parser.add_argument("--config", type=str, help="Path to a custom config file", default="./Local-NotebookLM/example_config.json")
+    parser.add_argument("--config", type=str, help="Path to a custom config file", default="./ollama_config.json")
     parser.add_argument("--format", type=str, choices=["podcast", "interview", "panel-discussion", "debate", "summary", "narration", "storytelling", "explainer", "lecture", "tutorial", "q-and-a", "news-report", "executive-brief", "meeting-minutes", "analysis"], default="summary", help="Output format type")
     parser.add_argument("--length", type=str, choices=["short", "medium", "long", "very-long"], default="medium", help="Content length")
     parser.add_argument("--style", type=str, choices=["normal", "friendly", "professional", "academic", "casual", "technical", "gen-z", "funny"], default="normal", help="Content style")

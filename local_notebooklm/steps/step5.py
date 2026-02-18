@@ -540,10 +540,18 @@ def step5(
     config: Dict[str, Any],
     input_dir: str,
     output_dir: str,
+    generate_html: bool = True,
+    generate_png: bool = True,
+    generate_pptx: bool = True,
 ) -> str:
     """Generate a visual infographic from the podcast transcript.
 
-    Returns the path to the generated HTML infographic.
+    Returns the path to the generated HTML infographic (or output_dir if
+    HTML generation was skipped).
+
+    The *generate_html*, *generate_png*, and *generate_pptx* flags allow
+    callers to skip individual outputs.  The LLM extraction (5a-5b) always
+    runs when any output is requested.
     """
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -564,7 +572,7 @@ def step5(
     # Generate charts (optional — returns empty dict if matplotlib is missing)
     charts = {}
     chart_pngs = {}
-    if _HAS_CHARTS:
+    if _HAS_CHARTS and (generate_html or generate_png or generate_pptx):
         try:
             logger.info("Generating infographic charts...")
             charts = generate_all_charts(data, str(output_path))
@@ -577,19 +585,22 @@ def step5(
         except Exception as exc:
             logger.warning(f"Chart generation failed: {exc}")
 
-    # 5c — Render HTML
-    logger.info("Step 5c: Rendering infographic HTML...")
-    html_content = render_infographic_html(data, charts=charts or None)
     html_path = output_path / "infographic.html"
-    html_path.write_text(html_content, encoding="utf-8")
-    logger.info(f"Saved infographic to {html_path}")
+
+    # 5c — Render HTML
+    if generate_html or generate_png:
+        logger.info("Step 5c: Rendering infographic HTML...")
+        html_content = render_infographic_html(data, charts=charts or None)
+        html_path.write_text(html_content, encoding="utf-8")
+        logger.info(f"Saved infographic to {html_path}")
 
     # 5d — Optional PNG
-    png_path = output_path / "infographic.png"
-    render_png(str(html_path.resolve()), str(png_path))
+    if generate_png and html_path.exists():
+        png_path = output_path / "infographic.png"
+        render_png(str(html_path.resolve()), str(png_path))
 
     # 5e — Optional PPTX
-    if _HAS_PPTX_MODULE:
+    if generate_pptx and _HAS_PPTX_MODULE:
         try:
             pptx_path = output_path / "infographic.pptx"
             pptx_result = render_infographic_pptx(
