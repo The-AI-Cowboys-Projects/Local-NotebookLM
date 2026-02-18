@@ -14,34 +14,68 @@ class LoaderError(Exception):
     pass
 
 
-def extract_text_from_pdf(file_path: str, max_chars: int = 100000) -> str:
+def _extract_pdf_with_docling(file_path: str, max_chars: int) -> str:
+    """Extract PDF text using docling (higher-quality: tables, layout, OCR)."""
+    from docling.document_converter import DocumentConverter
+
+    converter = DocumentConverter()
+    result = converter.convert(file_path)
+    text = result.document.export_to_markdown()
+
+    if not text or not text.strip():
+        raise ValueError("Docling returned empty text")
+
+    # Truncate at a line boundary near max_chars
+    if len(text) > max_chars:
+        cut = text.rfind("\n", 0, max_chars)
+        if cut == -1:
+            cut = max_chars
+        text = text[:cut]
+
+    logger.info(f"PDF extraction (docling) complete. {len(text)} chars")
+    return text
+
+
+def _extract_pdf_with_pypdf2(file_path: str, max_chars: int) -> str:
+    """Extract PDF text using PyPDF2 (fallback)."""
     import PyPDF2
 
+    with open(file_path, "rb") as f:
+        reader = PyPDF2.PdfReader(f)
+        num_pages = len(reader.pages)
+        logger.info(f"Processing PDF with {num_pages} pages (PyPDF2)")
+
+        parts = []
+        total = 0
+        for i, page in enumerate(reader.pages):
+            text = page.extract_text() or ""
+            if total + len(text) > max_chars:
+                parts.append(text[: max_chars - total])
+                logger.info(f"Reached {max_chars} char limit at page {i + 1}")
+                break
+            parts.append(text)
+            total += len(text)
+
+        result = "\n".join(parts)
+        logger.info(f"PDF extraction (PyPDF2) complete. {len(result)} chars")
+        return result
+
+
+def extract_text_from_pdf(file_path: str, max_chars: int = 100000) -> str:
     if not os.path.exists(file_path):
         raise LoaderError(f"File not found: {file_path}")
 
+    # Try docling first (higher-quality extraction with tables/layout/OCR)
     try:
-        with open(file_path, "rb") as f:
-            reader = PyPDF2.PdfReader(f)
-            num_pages = len(reader.pages)
-            logger.info(f"Processing PDF with {num_pages} pages")
+        return _extract_pdf_with_docling(file_path, max_chars)
+    except ImportError:
+        logger.info("docling not installed, falling back to PyPDF2")
+    except Exception as e:
+        logger.warning(f"docling extraction failed, falling back to PyPDF2: {e}")
 
-            parts = []
-            total = 0
-            for i, page in enumerate(reader.pages):
-                text = page.extract_text() or ""
-                if total + len(text) > max_chars:
-                    parts.append(text[: max_chars - total])
-                    logger.info(f"Reached {max_chars} char limit at page {i + 1}")
-                    break
-                parts.append(text)
-                total += len(text)
-
-            result = "\n".join(parts)
-            logger.info(f"PDF extraction complete. {len(result)} chars")
-            return result
-    except LoaderError:
-        raise
+    # Fallback to PyPDF2
+    try:
+        return _extract_pdf_with_pypdf2(file_path, max_chars)
     except Exception as e:
         raise LoaderError(f"Failed to extract text from PDF: {e}")
 

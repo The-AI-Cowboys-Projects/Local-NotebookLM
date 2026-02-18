@@ -92,6 +92,21 @@ def _add_bullet_frame(slide, left, top, width, height, items: List[str],
     return txBox
 
 
+def _add_chart_image(slide, chart_path: str):
+    """Add a chart PNG to the right half of a slide."""
+    from pptx.util import Inches, Emu
+
+    if not chart_path or not Path(chart_path).exists():
+        return
+    slide.shapes.add_picture(
+        chart_path,
+        left=Emu(int(_SLIDE_WIDTH_EMU * 0.52)),
+        top=Emu(int(Inches(1.2))),
+        width=Emu(int(_SLIDE_WIDTH_EMU * 0.44)),
+        height=Emu(int(Inches(5.0))),
+    )
+
+
 # ---------------------------------------------------------------------------
 # 5d — PPTX generation
 # ---------------------------------------------------------------------------
@@ -99,8 +114,13 @@ def _add_bullet_frame(slide, left, top, width, height, items: List[str],
 def render_infographic_pptx(
     data: Dict[str, Any],
     output_path: str,
+    chart_images: Optional[Dict[str, str]] = None,
 ) -> Optional[str]:
     """Generate a 6-slide PPTX presentation from structured infographic data.
+
+    *chart_images* is an optional dict mapping chart names
+    (``"topics"``, ``"speakers"``, ``"flow"``) to PNG file paths.
+    When provided, the chart image is added to the corresponding slide.
 
     Returns the output path on success, or None if python-pptx is not installed.
     """
@@ -116,6 +136,7 @@ def render_infographic_pptx(
         prs = Presentation()
         prs.slide_width = Emu(_SLIDE_WIDTH_EMU)
         prs.slide_height = Emu(_SLIDE_HEIGHT_EMU)
+        _charts = chart_images or {}
 
         # Use blank layout for full control
         blank_layout = prs.slide_layouts[6]  # blank
@@ -187,6 +208,9 @@ def render_infographic_pptx(
                 font_size=14,
                 color=_THEME["body"],
             )
+
+        if "topics" in _charts:
+            _add_chart_image(slide, _charts["topics"])
 
         # ----- Slide 3: Key Takeaways -----
         slide = prs.slides.add_slide(blank_layout)
@@ -286,6 +310,9 @@ def render_infographic_pptx(
                 color=_THEME["body"],
             )
 
+        if "speakers" in _charts:
+            _add_chart_image(slide, _charts["speakers"])
+
         # ----- Slide 6: Conversation Flow -----
         slide = prs.slides.add_slide(blank_layout)
         _set_slide_bg(slide, _THEME["bg"])
@@ -320,6 +347,9 @@ def render_infographic_pptx(
                 color=_THEME["body"],
                 prefix_fn=lambda i: f"{i + 1}. ",
             )
+
+        if "flow" in _charts:
+            _add_chart_image(slide, _charts["flow"])
 
         # Save
         out = Path(output_path)

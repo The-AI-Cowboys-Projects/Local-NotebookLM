@@ -17,6 +17,12 @@ from local_notebooklm.steps.step5_pptx import (
     render_infographic_pptx,
     render_video,
 )
+from local_notebooklm.steps.step5_charts import (
+    generate_all_charts,
+    generate_conversation_flow_chart,
+    generate_speaker_distribution_chart,
+    generate_topic_importance_chart,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -290,3 +296,141 @@ class TestPptxGeneration:
 
         assert (output_dir / "infographic.html").exists()
         assert (output_dir / "infographic.pptx").exists()
+
+
+# ---------------------------------------------------------------------------
+# TestChartGeneration
+# ---------------------------------------------------------------------------
+
+class TestChartGeneration:
+    def test_topic_chart_returns_base64(self):
+        result = generate_topic_importance_chart(SAMPLE_DATA)
+        assert result is not None
+        b64, png = result
+        assert b64.startswith("data:image/png;base64,")
+        assert png is None
+
+    def test_topic_chart_saves_png(self, tmp_path):
+        out = str(tmp_path / "topics.png")
+        result = generate_topic_importance_chart(SAMPLE_DATA, output_path=out)
+        assert result is not None
+        _, png = result
+        assert png == out
+        assert (tmp_path / "topics.png").exists()
+
+    def test_topic_chart_empty_data(self):
+        result = generate_topic_importance_chart({"topics": []})
+        assert result is None
+
+    def test_speaker_chart_returns_base64(self):
+        result = generate_speaker_distribution_chart(SAMPLE_DATA)
+        assert result is not None
+        b64, png = result
+        assert b64.startswith("data:image/png;base64,")
+        assert png is None
+
+    def test_speaker_chart_saves_png(self, tmp_path):
+        out = str(tmp_path / "speakers.png")
+        result = generate_speaker_distribution_chart(SAMPLE_DATA, output_path=out)
+        assert result is not None
+        _, png = result
+        assert png == out
+        assert (tmp_path / "speakers.png").exists()
+
+    def test_speaker_chart_empty_data(self):
+        result = generate_speaker_distribution_chart({"speakers": []})
+        assert result is None
+
+    def test_speaker_chart_zero_counts(self):
+        data = {"speakers": [{"label": "A", "line_count": 0}]}
+        result = generate_speaker_distribution_chart(data)
+        assert result is None
+
+    def test_flow_chart_returns_base64(self):
+        result = generate_conversation_flow_chart(SAMPLE_DATA)
+        assert result is not None
+        b64, png = result
+        assert b64.startswith("data:image/png;base64,")
+        assert png is None
+
+    def test_flow_chart_saves_png(self, tmp_path):
+        out = str(tmp_path / "flow.png")
+        result = generate_conversation_flow_chart(SAMPLE_DATA, output_path=out)
+        assert result is not None
+        _, png = result
+        assert png == out
+        assert (tmp_path / "flow.png").exists()
+
+    def test_flow_chart_empty_data(self):
+        result = generate_conversation_flow_chart({"conversation_flow": []})
+        assert result is None
+
+    def test_generate_all_charts(self, tmp_path):
+        results = generate_all_charts(SAMPLE_DATA, str(tmp_path))
+        assert "topics" in results
+        assert "speakers" in results
+        assert "flow" in results
+        generated = sum(1 for v in results.values() if v is not None)
+        assert generated == 3
+        assert (tmp_path / "chart_topics.png").exists()
+        assert (tmp_path / "chart_speakers.png").exists()
+        assert (tmp_path / "chart_flow.png").exists()
+
+
+# ---------------------------------------------------------------------------
+# TestChartGracefulDegradation
+# ---------------------------------------------------------------------------
+
+class TestChartGracefulDegradation:
+    def test_topic_chart_none_without_matplotlib(self):
+        with patch.dict("sys.modules", {"matplotlib": None, "matplotlib.pyplot": None}):
+            with patch("local_notebooklm.steps.step5_charts._setup_cyberpunk_style", side_effect=ImportError):
+                result = generate_topic_importance_chart(SAMPLE_DATA)
+                assert result is None
+
+    def test_speaker_chart_none_without_matplotlib(self):
+        with patch("local_notebooklm.steps.step5_charts._setup_cyberpunk_style", side_effect=ImportError):
+            result = generate_speaker_distribution_chart(SAMPLE_DATA)
+            assert result is None
+
+    def test_flow_chart_none_without_matplotlib(self):
+        with patch("local_notebooklm.steps.step5_charts._setup_cyberpunk_style", side_effect=ImportError):
+            result = generate_conversation_flow_chart(SAMPLE_DATA)
+            assert result is None
+
+    def test_generate_all_returns_nones_without_matplotlib(self):
+        with patch("local_notebooklm.steps.step5_charts._setup_cyberpunk_style", side_effect=ImportError):
+            results = generate_all_charts(SAMPLE_DATA)
+            assert all(v is None for v in results.values())
+
+
+# ---------------------------------------------------------------------------
+# TestHtmlWithCharts
+# ---------------------------------------------------------------------------
+
+class TestHtmlWithCharts:
+    def test_no_charts_no_img_tags(self):
+        result = render_infographic_html(SAMPLE_DATA)
+        assert "data:image/png;base64," not in result
+
+    def test_with_charts_has_img_tags(self):
+        fake_b64 = "data:image/png;base64,AAAA"
+        charts = {
+            "topics": (fake_b64, None),
+            "speakers": (fake_b64, None),
+            "flow": (fake_b64, None),
+        }
+        result = render_infographic_html(SAMPLE_DATA, charts=charts)
+        assert result.count("data:image/png;base64,AAAA") == 3
+        assert result.count("<img ") == 3
+
+    def test_partial_charts_only_available(self):
+        fake_b64 = "data:image/png;base64,BBBB"
+        charts = {
+            "topics": (fake_b64, None),
+            "speakers": None,
+            "flow": None,
+        }
+        result = render_infographic_html(SAMPLE_DATA, charts=charts)
+        assert result.count("data:image/png;base64,BBBB") == 1
+        assert result.count("<img ") == 1

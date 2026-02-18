@@ -229,3 +229,88 @@ class TestDispatcher:
         with patch("local_notebooklm.loaders.extract_text_from_url", return_value="ok") as mock:
             load_input("https://example.com")
             mock.assert_called_once()
+
+
+# ── Docling PDF Loader Tests ───────────────────────────────────────
+
+
+class TestDoclingPdfLoader:
+    """Tests for the docling-first-then-PyPDF2 fallback pattern."""
+
+    def test_uses_docling_when_available(self, tmp_path):
+        """When docling is importable and works, PyPDF2 should not be called."""
+        pdf = tmp_path / "test.pdf"
+        pdf.write_bytes(b"%PDF-fake")
+
+        mock_converter_instance = MagicMock()
+        mock_converter_instance.convert.return_value.document.export_to_markdown.return_value = (
+            "# Title\n\nDocling extracted content"
+        )
+        mock_converter_cls = MagicMock(return_value=mock_converter_instance)
+
+        mock_docling = MagicMock()
+        mock_docling.document_converter.DocumentConverter = mock_converter_cls
+
+        with patch.dict("sys.modules", {"docling": mock_docling, "docling.document_converter": mock_docling.document_converter}):
+            with patch("local_notebooklm.loaders._extract_pdf_with_pypdf2") as mock_pypdf2:
+                result = extract_text_from_pdf(str(pdf))
+                assert "Docling extracted content" in result
+                mock_pypdf2.assert_not_called()
+
+    def test_falls_back_when_docling_missing(self, tmp_path):
+        """ImportError from docling should fall back to PyPDF2."""
+        pdf = tmp_path / "test.pdf"
+        pdf.write_bytes(b"%PDF-fake")
+
+        with patch("local_notebooklm.loaders._extract_pdf_with_docling", side_effect=ImportError("No module")):
+            with patch("local_notebooklm.loaders._extract_pdf_with_pypdf2", return_value="PyPDF2 text") as mock_p:
+                result = extract_text_from_pdf(str(pdf))
+                assert result == "PyPDF2 text"
+                mock_p.assert_called_once()
+
+    def test_falls_back_when_docling_fails(self, tmp_path):
+        """RuntimeError from docling should fall back to PyPDF2."""
+        pdf = tmp_path / "test.pdf"
+        pdf.write_bytes(b"%PDF-fake")
+
+        with patch("local_notebooklm.loaders._extract_pdf_with_docling", side_effect=RuntimeError("parse error")):
+            with patch("local_notebooklm.loaders._extract_pdf_with_pypdf2", return_value="fallback") as mock_p:
+                result = extract_text_from_pdf(str(pdf))
+                assert result == "fallback"
+                mock_p.assert_called_once()
+
+    def test_falls_back_when_docling_returns_empty(self, tmp_path):
+        """Docling returning empty text should fall back to PyPDF2."""
+        pdf = tmp_path / "test.pdf"
+        pdf.write_bytes(b"%PDF-fake")
+
+        with patch("local_notebooklm.loaders._extract_pdf_with_docling", side_effect=ValueError("Docling returned empty text")):
+            with patch("local_notebooklm.loaders._extract_pdf_with_pypdf2", return_value="fallback content") as mock_p:
+                result = extract_text_from_pdf(str(pdf))
+                assert result == "fallback content"
+                mock_p.assert_called_once()
+
+    def test_docling_max_chars_truncation(self, tmp_path):
+        """Docling output should be truncated at a line boundary near max_chars."""
+        pdf = tmp_path / "test.pdf"
+        pdf.write_bytes(b"%PDF-fake")
+
+        long_text = "Line one\nLine two\nLine three\nLine four\nLine five"
+
+        mock_converter_instance = MagicMock()
+        mock_converter_instance.convert.return_value.document.export_to_markdown.return_value = long_text
+        mock_converter_cls = MagicMock(return_value=mock_converter_instance)
+
+        mock_docling = MagicMock()
+        mock_docling.document_converter.DocumentConverter = mock_converter_cls
+
+        with patch.dict("sys.modules", {"docling": mock_docling, "docling.document_converter": mock_docling.document_converter}):
+            result = extract_text_from_pdf(str(pdf), max_chars=20)
+            assert len(result) <= 20
+            # Should truncate at a newline boundary
+            assert "\n" not in result or result.endswith("\n") is False
+
+    def test_file_not_found_still_raises(self):
+        """File-not-found check should fire before dispatch to either extractor."""
+        with pytest.raises(LoaderError, match="File not found"):
+            extract_text_from_pdf("/nonexistent/path.pdf")
