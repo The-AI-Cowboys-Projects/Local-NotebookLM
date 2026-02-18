@@ -6,7 +6,7 @@ def main():
     parser = argparse.ArgumentParser(description="Generate a podcast from a PDF document")
     
     # Required arguments
-    parser.add_argument("--pdf", type=str, required=True, help="Path to the PDF file")
+    parser.add_argument("--input", type=str, required=True, help="Path to input file (PDF, DOCX, PPTX, TXT, MD) or URL")
     
     # Optional arguments
     parser.add_argument("--config", type=str, help="Path to a custom config file", default="./Local-NotebookLM/example_config.json")
@@ -15,14 +15,14 @@ def main():
     parser.add_argument("--style", type=str, choices=["normal", "friendly", "professional", "academic", "casual", "technical", "gen-z", "funny"], default="normal", help="Content style")
     parser.add_argument("--preference", type=str, help="Additional preferences or instructions")
     parser.add_argument("--output-dir", type=str, default="./output", help="Directory to store output files")
-    parser.add_argument("--skip-to", type=int, choices=[1, 2, 3, 4], help="Skip to a specific step (1-4)")
+    parser.add_argument("--skip-to", type=int, choices=[1, 2, 3, 4, 5], help="Skip to a specific step (1-5)")
     parser.add_argument("--language", type=str, help="Additional preferences or instructions")
     
     args = parser.parse_args()
     
     # Call the main process function with parsed arguments
     success, result = podcast_processor(
-        pdf_path=args.pdf,
+        input_path=args.input,
         config_path=args.config,
         format_type=args.format,
         length=args.length,

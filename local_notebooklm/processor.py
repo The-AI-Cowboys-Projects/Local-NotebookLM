@@ -5,9 +5,11 @@ from .steps.step1 import step1
 from .steps.step2 import step2
 from .steps.step3 import step3
 from .steps.step4 import step4
+from .steps.step5 import step5
+from .config import validate_config, ConfigValidationError
 
 def podcast_processor(
-    pdf_path,
+    input_path,
     config_path=None,
     format_type="summary",
     length="medium",
@@ -25,6 +27,12 @@ def podcast_processor(
     else:
         from local_notebooklm.config import base_config
         config = base_config
+
+    # Validate config before proceeding
+    try:
+        validate_config(config)
+    except ConfigValidationError as e:
+        return False, f"Invalid configuration: {e}"
     
     # Create output directories
     output_base = Path(output_dir)
@@ -32,7 +40,8 @@ def podcast_processor(
         "step1": output_base / "step1",
         "step2": output_base / "step2",
         "step3": output_base / "step3",
-        "step4": output_base / "step4"
+        "step4": output_base / "step4",
+        "step5": output_base / "step5"
     }
     
     for dir_path in output_dirs.values():
@@ -60,12 +69,12 @@ def podcast_processor(
             else:
                 system_prompts[step_name] = None
         
-        # Step 1: Process PDF
+        # Step 1: Extract and clean text
         if not skip_to or skip_to <= 1:
-            print("Step 1: Processing PDF...")
+            print("Step 1: Processing input document...")
             cleaned_text_file = step1(
                 client=small_text_client,
-                pdf_path=pdf_path,
+                input_path=input_path,
                 config=config,
                 output_dir=str(output_dirs["step1"]),
                 system_prompt=system_prompts["step1"]
@@ -132,12 +141,29 @@ def podcast_processor(
                 input_dir=str(output_dirs["step3"]),
                 output_dir=str(output_dirs["step4"])
             )
-            
+
             print(f"Podcast generation complete! Final audio file: {final_audio_path}")
+        else:
+            final_audio_path = None
+
+        # Step 5: Generate infographic (non-fatal)
+        if not skip_to or skip_to <= 5:
+            try:
+                print("Step 5: Generating infographic...")
+                step5(
+                    client=big_text_client,
+                    config=config,
+                    input_dir=str(output_dirs["step3"]),
+                    output_dir=str(output_dirs["step5"])
+                )
+                print("Infographic generated successfully!")
+            except Exception as e:
+                print(f"Step 5 (infographic) failed (non-fatal): {e}")
+
+        if final_audio_path:
             return True, final_audio_path
-        
         return True, "Process completed successfully (without audio generation)"
-        
+
     except Exception as e:
         error_msg = f"Error during podcast generation: {str(e)}"
         print(error_msg)
