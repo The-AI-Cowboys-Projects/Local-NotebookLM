@@ -527,6 +527,79 @@ FOOTER_HTML = """
 
 
 # ---------------------------------------------------------------------------
+# Session restore — reload last results on page load
+# ---------------------------------------------------------------------------
+
+_DEFAULT_OUTPUT_DIR = "./local_notebooklm/web_ui/output"
+
+
+def _load_previous_results(output_dir=None):
+    """Check for existing outputs and return them if present."""
+    d = output_dir or _DEFAULT_OUTPUT_DIR
+    if not os.path.isdir(d):
+        return None
+
+    audio_path = None
+    candidate = os.path.join(d, "podcast.wav")
+    if os.path.exists(candidate):
+        audio_path = candidate
+
+    file_contents = {}
+    for rel in ["step1/extracted_text.txt", "step1/clean_extracted_text.txt", "step3/podcast_ready_data.txt"]:
+        fp = os.path.join(d, rel)
+        if os.path.exists(fp):
+            try:
+                with open(fp, 'r', encoding='utf-8') as f:
+                    c = f.read()
+                    file_contents[rel] = c[:1000] + "..." if len(c) > 1000 else c
+            except Exception:
+                pass
+
+    infographic_html = None
+    infographic_file = None
+    infographic_path = os.path.join(d, "step5", "infographic.html")
+    if os.path.exists(infographic_path):
+        try:
+            with open(infographic_path, 'r', encoding='utf-8') as f:
+                infographic_html = f'<iframe srcdoc="{f.read().replace(chr(34), "&quot;").replace(chr(10), "&#10;")}" style="width:100%;height:600px;border:1px solid #1e1e40;border-radius:8px;" sandbox="allow-same-origin"></iframe>'
+            infographic_file = infographic_path
+        except Exception:
+            pass
+
+    pptx_file = None
+    pptx_path = os.path.join(d, "step5", "infographic.pptx")
+    if os.path.exists(pptx_path):
+        pptx_file = pptx_path
+
+    has_anything = audio_path or infographic_html or pptx_file or file_contents
+    if not has_anything:
+        return None
+
+    parts = []
+    if audio_path:
+        parts.append("Audio")
+    if infographic_html:
+        parts.append("Infographic HTML")
+    if os.path.exists(os.path.join(d, "step5", "infographic.png")):
+        parts.append("Infographic PNG")
+    if pptx_file:
+        parts.append("PPTX")
+
+    status = f"Previous results loaded: {', '.join(parts)}" if parts else ""
+
+    return (
+        status,
+        audio_path,
+        file_contents.get("step1/extracted_text.txt", ""),
+        file_contents.get("step1/clean_extracted_text.txt", ""),
+        file_contents.get("step3/podcast_ready_data.txt", ""),
+        infographic_html,
+        infographic_file,
+        pptx_file,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Processing logic
 # ---------------------------------------------------------------------------
 
@@ -535,7 +608,7 @@ def _empty_result(status_msg):
     return (status_msg, None, "", "", "", None, None, None)
 
 
-def process_podcast(pdf_file, url_input, config_file, format_type, length, style, language, additional_preference, output_dir, skip_to, outputs_to_generate, progress=gr.Progress(track_tqdm=False)):
+def process_podcast(pdf_file, url_input, config_file, format_type, length, style, language, additional_preference, output_dir, skip_to, outputs_to_generate):
     """Generator that yields progress updates then a final result tuple."""
 
     # Resolve input: URL takes priority over file upload
@@ -579,24 +652,14 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
         want_pptx = "PPTX Slides" in outputs_to_generate
         want_any_infographic = want_html or want_png or want_pptx
 
-        # Calculate total steps for progress bar
+        # Calculate total steps
         total_steps = 3  # Steps 1-3 always run
         if want_audio:
             total_steps += 1
         if want_any_infographic:
             total_steps += 1
-        current_step = 0
 
-        # --- Step 1 ---
-        progress(current_step / total_steps, desc="Step 1/5: Extracting text...")
-        yield _empty_result(f"[Step 1/{total_steps}] Extracting text...")
-
-        # --- Step 2 ---
-        # (progress updated when processor reaches each step — we yield before calling)
-
-        # --- Run the full pipeline ---
-        # We yield status before the blocking call, then update after
-        progress(0.05, desc="Step 1: Extracting text...")
+        # Show initial status
         yield _empty_result(f"[1/{total_steps}] Extracting text from input...")
 
         success, result = podcast_processor(
@@ -615,8 +678,6 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
         if not success:
             yield _empty_result(f"Failed: {result}")
             return
-
-        progress(1.0, desc="Complete!")
 
         # --- Collect results ---
         audio_path = None
@@ -835,9 +896,19 @@ def create_gradio_ui():
             fn=process_podcast,
             inputs=[pdf_file, url_input, config_file, format_type, length, style, language, additional_preference, output_dir, skip_to, outputs_to_generate],
             outputs=[result_message, audio_output, extracted_text, clean_text, audio_script, infographic_preview, infographic_download, pptx_download],
+            show_progress="hidden",
         )
 
-    # Enable queue for progress bar support and session resilience on refresh
+        # Restore previous results on page load / refresh
+        restore_outputs = [result_message, audio_output, extracted_text, clean_text, audio_script, infographic_preview, infographic_download, pptx_download]
+        app.load(
+            fn=_load_previous_results,
+            inputs=None,
+            outputs=restore_outputs,
+            show_progress="hidden",
+        )
+
+    # Enable queue for session resilience
     app.queue()
 
     return app
