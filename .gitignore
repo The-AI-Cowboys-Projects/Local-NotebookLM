@@ -19,5 +19,8 @@ conda
 local_notebooklm/web_ui/output
 .local_notebooklm/web_ui/output
 
+local_notebooklm/web_ui/notebooks
+.local_notebooklm/web_ui/notebooks
+
 .gradio
 gradio

@@ -6,6 +6,7 @@ import gradio as gr
 import argparse
 from local_notebooklm.processor import podcast_processor
 from local_notebooklm.steps.helpers import LengthType, FormatType, StyleType, SkipToOptions
+from local_notebooklm.notebook_manager import NotebookManager
 
 
 # ---------------------------------------------------------------------------
@@ -510,6 +511,67 @@ CYBERPUNK_CSS = """
     font-size: 0.85rem;
     line-height: 1.6;
 }
+
+/* ── Notebook bar ───────────────────────────────────────────── */
+.notebook-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.45rem 1rem;
+    border-bottom: 1px solid var(--panel-border);
+    background: var(--panel-bg);
+}
+.notebook-bar .nb-btn button {
+    font-family: 'JetBrains Mono', monospace !important;
+    font-size: 0.72rem !important;
+    padding: 0.35rem 0.7rem !important;
+    letter-spacing: 0.06em !important;
+}
+
+/* ── Source list in left panel ──────────────────────────────── */
+.source-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 0.4rem 0;
+}
+.source-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.45rem 0.65rem;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 6px;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.78rem;
+    color: var(--text-primary);
+    transition: border-color 0.25s, box-shadow 0.25s;
+}
+.source-item:hover {
+    border-color: rgba(59, 214, 198, 0.3);
+    box-shadow: var(--glow-teal);
+}
+.source-icon {
+    flex-shrink: 0;
+    width: 18px;
+    text-align: center;
+    color: var(--neon-cyan);
+    font-size: 0.82rem;
+}
+.source-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.source-empty {
+    font-family: 'Inter', sans-serif;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    text-align: center;
+    padding: 1rem 0.5rem;
+}
 """
 
 
@@ -545,15 +607,21 @@ FOOTER_HTML = """
 
 
 # ---------------------------------------------------------------------------
-# Session restore — reload last results on page load
+# Notebook manager (global singleton)
 # ---------------------------------------------------------------------------
 
-_DEFAULT_OUTPUT_DIR = "./local_notebooklm/web_ui/output"
+_notebook_mgr = NotebookManager()
 
 
-def _load_previous_results(output_dir=None):
-    """Check for existing outputs and return them if present."""
-    d = output_dir or _DEFAULT_OUTPUT_DIR
+# ---------------------------------------------------------------------------
+# Session restore — reload outputs from a notebook directory
+# ---------------------------------------------------------------------------
+
+def _load_results_from_dir(d: str):
+    """Scan a directory for pipeline outputs and return an 8-tuple.
+
+    Returns ``None`` when nothing is found.
+    """
     if not os.path.isdir(d):
         return None
 
@@ -615,6 +683,149 @@ def _load_previous_results(output_dir=None):
         infographic_file,
         pptx_file,
     )
+
+
+# ---------------------------------------------------------------------------
+# Notebook callbacks
+# ---------------------------------------------------------------------------
+
+def _dropdown_choices():
+    """Return Gradio-compatible ``(label, value)`` list for the notebook dropdown."""
+    return [(nb["name"], nb["id"]) for nb in _notebook_mgr.list_notebooks()]
+
+
+def _build_sources_html(sources: list[dict]) -> str:
+    """Render source list as styled HTML cards."""
+    if not sources:
+        return '<div class="source-empty">No sources yet — upload a file or paste a URL</div>'
+    items = []
+    for i, s in enumerate(sources):
+        if s.get("type") == "file":
+            icon = "&#128196;"  # document emoji as fallback
+            label = s.get("filename", "unknown")
+        else:
+            icon = "&#128279;"  # link emoji
+            label = s.get("url", "unknown")
+        items.append(
+            f'<div class="source-item">'
+            f'<span class="source-icon">{icon}</span>'
+            f'<span class="source-name" title="{label}">{label}</span>'
+            f'</div>'
+        )
+    return '<div class="source-list">' + "".join(items) + '</div>'
+
+
+def _empty_outputs():
+    """8-tuple of empty/cleared outputs."""
+    return ("", None, "", "", "", None, None, None)
+
+
+def _on_notebook_switch(notebook_id):
+    """Load sources, results, and settings for the selected notebook.
+
+    Returns updates for:
+      sources_display, result_message, audio_output, extracted_text,
+      clean_text, audio_script, infographic_preview, infographic_download,
+      pptx_download, format, length, style, language, outputs_to_generate,
+      output_dir
+    """
+    if not notebook_id:
+        return (
+            _build_sources_html([]),
+            *_empty_outputs(),
+            "podcast", "medium", "normal", "english",
+            ["Podcast Audio", "Infographic HTML", "Infographic PNG", "PPTX Slides"],
+            "",
+        )
+
+    _notebook_mgr.set_default_notebook_id(notebook_id)
+    sources = _notebook_mgr.get_sources(notebook_id)
+    settings = _notebook_mgr.get_settings(notebook_id)
+    nb_dir = _notebook_mgr.get_notebook_dir(notebook_id)
+
+    sources_html = _build_sources_html(sources)
+
+    results = _load_results_from_dir(nb_dir)
+    if results is None:
+        results = _empty_outputs()
+
+    return (
+        sources_html,
+        *results,
+        settings.get("format", "podcast"),
+        settings.get("length", "medium"),
+        settings.get("style", "normal"),
+        settings.get("language", "english"),
+        settings.get("outputs_to_generate", ["Podcast Audio", "Infographic HTML", "Infographic PNG", "PPTX Slides"]),
+        nb_dir,
+    )
+
+
+def _on_create_notebook(name):
+    """Create a notebook.  Returns updated dropdown + selected value + cleared name input."""
+    nb_id = _notebook_mgr.create_notebook(name)
+    choices = _dropdown_choices()
+    return gr.update(choices=choices, value=nb_id), ""
+
+
+def _on_rename_notebook(notebook_id, new_name):
+    """Rename the current notebook.  Returns updated dropdown."""
+    if not notebook_id or not new_name or not new_name.strip():
+        return gr.update()
+    try:
+        _notebook_mgr.rename_notebook(notebook_id, new_name)
+    except (KeyError, ValueError):
+        return gr.update()
+    choices = _dropdown_choices()
+    return gr.update(choices=choices, value=notebook_id)
+
+
+def _on_delete_notebook(notebook_id):
+    """Delete notebook.  Returns updated dropdown + value to switch to."""
+    if not notebook_id:
+        return gr.update()
+    next_id = _notebook_mgr.delete_notebook(notebook_id)
+    choices = _dropdown_choices()
+    return gr.update(choices=choices, value=next_id)
+
+
+def _on_file_upload(file, notebook_id):
+    """Copy uploaded file into the notebook sources.  Returns sources HTML."""
+    if file is None or not notebook_id:
+        sources = _notebook_mgr.get_sources(notebook_id) if notebook_id else []
+        return _build_sources_html(sources)
+    file_path = file.name if hasattr(file, "name") else file
+    original_name = os.path.basename(file_path)
+    _notebook_mgr.add_file_source(notebook_id, file_path, original_name)
+    return _build_sources_html(_notebook_mgr.get_sources(notebook_id))
+
+
+def _on_url_add(url, notebook_id):
+    """Record URL in notebook metadata.  Returns sources HTML + cleared URL input."""
+    if not url or not url.strip() or not notebook_id:
+        sources = _notebook_mgr.get_sources(notebook_id) if notebook_id else []
+        return _build_sources_html(sources), url or ""
+    _notebook_mgr.add_url_source(notebook_id, url.strip())
+    return _build_sources_html(_notebook_mgr.get_sources(notebook_id)), ""
+
+
+def _on_settings_change(notebook_id, fmt, length, style, lang, outputs):
+    """Silently save settings to notebook metadata."""
+    if not notebook_id:
+        return
+    _notebook_mgr.save_settings(notebook_id, {
+        "format": fmt,
+        "length": length,
+        "style": style,
+        "language": lang,
+        "outputs_to_generate": outputs,
+    })
+
+
+def _on_app_load():
+    """Called on page load — switch to the default notebook."""
+    default_id = _notebook_mgr.get_default_notebook_id()
+    return default_id
 
 
 # ---------------------------------------------------------------------------
@@ -773,10 +984,33 @@ def create_gradio_ui():
 
     theme = _build_cyberpunk_theme()
 
+    # Pre-compute initial notebook state
+    initial_choices = _dropdown_choices()
+    initial_default = _notebook_mgr.get_default_notebook_id()
+
     with gr.Blocks(title="Local-NotebookLM", analytics_enabled=False) as app:
 
         # ── Header bar ────────────────────────────────────────
         gr.HTML(HEADER_HTML)
+
+        # ── Notebook bar ──────────────────────────────────────
+        with gr.Row(elem_classes="notebook-bar"):
+            notebook_selector = gr.Dropdown(
+                choices=initial_choices,
+                value=initial_default,
+                label="Notebook",
+                scale=3,
+                container=False,
+            )
+            notebook_name_input = gr.Textbox(
+                placeholder="notebook name...",
+                scale=2,
+                container=False,
+                show_label=False,
+            )
+            btn_new = gr.Button("+ New", size="sm", variant="secondary", elem_classes="nb-btn", scale=0)
+            btn_rename = gr.Button("Rename", size="sm", variant="secondary", elem_classes="nb-btn", scale=0)
+            btn_delete = gr.Button("Delete", size="sm", variant="stop", elem_classes="nb-btn", scale=0)
 
         # ── 3-Panel layout ────────────────────────────────────
         with gr.Row(equal_height=True):
@@ -787,6 +1021,9 @@ def create_gradio_ui():
             with gr.Column(scale=1, min_width=280, elem_classes="panel panel-left"):
                 gr.HTML('<div class="panel-header">Sources</div>')
                 with gr.Group(elem_classes="panel-content"):
+                    sources_display = gr.HTML(
+                        value=_build_sources_html([]),
+                    )
                     pdf_file = gr.File(
                         label="Upload Document",
                         file_types=[".pdf", ".docx", ".pptx", ".txt", ".md"],
@@ -803,7 +1040,6 @@ def create_gradio_ui():
                             file_types=[".json"],
                             elem_classes="cyber-upload",
                         )
-                    gr.HTML('<p class="panel-empty">Upload a document or paste a URL to get started</p>')
 
             # ═══════════════════════════════════════════════
             # CENTER PANEL — Workspace
@@ -895,7 +1131,8 @@ def create_gradio_ui():
                         )
                         output_dir = gr.Textbox(
                             label="Output Directory",
-                            value="./local_notebooklm/web_ui/output",
+                            value="",
+                            visible=False,
                         )
                         skip_to = gr.Dropdown(
                             choices=SkipToOptions,
@@ -908,7 +1145,79 @@ def create_gradio_ui():
         # ── Footer ────────────────────────────────────────────
         gr.HTML(FOOTER_HTML)
 
-        # ── Wiring ────────────────────────────────────────────
+        # ── All output components (order matches _on_notebook_switch) ──
+        switch_outputs = [
+            sources_display,
+            result_message, audio_output, extracted_text, clean_text,
+            audio_script, infographic_preview, infographic_download, pptx_download,
+            format_type, length, style, language, outputs_to_generate,
+            output_dir,
+        ]
+
+        # ── Wiring — Notebook bar ─────────────────────────────
+        notebook_selector.change(
+            fn=_on_notebook_switch,
+            inputs=[notebook_selector],
+            outputs=switch_outputs,
+            show_progress="hidden",
+        )
+
+        btn_new.click(
+            fn=_on_create_notebook,
+            inputs=[notebook_name_input],
+            outputs=[notebook_selector, notebook_name_input],
+            show_progress="hidden",
+        ).then(
+            fn=_on_notebook_switch,
+            inputs=[notebook_selector],
+            outputs=switch_outputs,
+            show_progress="hidden",
+        )
+
+        btn_rename.click(
+            fn=_on_rename_notebook,
+            inputs=[notebook_selector, notebook_name_input],
+            outputs=[notebook_selector],
+            show_progress="hidden",
+        )
+
+        btn_delete.click(
+            fn=_on_delete_notebook,
+            inputs=[notebook_selector],
+            outputs=[notebook_selector],
+            show_progress="hidden",
+        ).then(
+            fn=_on_notebook_switch,
+            inputs=[notebook_selector],
+            outputs=switch_outputs,
+            show_progress="hidden",
+        )
+
+        # ── Wiring — Source uploads ───────────────────────────
+        pdf_file.change(
+            fn=_on_file_upload,
+            inputs=[pdf_file, notebook_selector],
+            outputs=[sources_display],
+            show_progress="hidden",
+        )
+
+        url_input.submit(
+            fn=_on_url_add,
+            inputs=[url_input, notebook_selector],
+            outputs=[sources_display, url_input],
+            show_progress="hidden",
+        )
+
+        # ── Wiring — Auto-save settings on change ────────────
+        for setting_component in [format_type, length, style, language, outputs_to_generate]:
+            setting_component.change(
+                fn=_on_settings_change,
+                inputs=[notebook_selector, format_type, length, style, language, outputs_to_generate],
+                outputs=None,
+                show_progress="hidden",
+            )
+
+        # ── Wiring — Generate ─────────────────────────────────
         generate_button.click(
             fn=process_podcast,
             inputs=[pdf_file, url_input, config_file, format_type, length, style, language, additional_preference, output_dir, skip_to, outputs_to_generate],
@@ -916,12 +1225,16 @@ def create_gradio_ui():
             show_progress="hidden",
         )
 
-        # Restore previous results on page load / refresh
-        restore_outputs = [result_message, audio_output, extracted_text, clean_text, audio_script, infographic_preview, infographic_download, pptx_download]
+        # ── Restore notebook on page load / refresh ───────────
         app.load(
-            fn=_load_previous_results,
+            fn=_on_app_load,
             inputs=None,
-            outputs=restore_outputs,
+            outputs=[notebook_selector],
+            show_progress="hidden",
+        ).then(
+            fn=_on_notebook_switch,
+            inputs=[notebook_selector],
+            outputs=switch_outputs,
             show_progress="hidden",
         )
 
