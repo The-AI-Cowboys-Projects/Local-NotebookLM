@@ -85,7 +85,7 @@ def _build_cyberpunk_theme():
 
 
 # ---------------------------------------------------------------------------
-# Cyberpunk CSS
+# Refined Cyberpunk CSS
 # ---------------------------------------------------------------------------
 
 CYBERPUNK_CSS = """
@@ -105,10 +105,10 @@ CYBERPUNK_CSS = """
     --card-border: #1e1e40;
     --text-primary: #e0e0f0;
     --text-muted: #8888aa;
-    --glow-cyan: 0 0 12px rgba(0,240,255,0.35), 0 0 30px rgba(0,240,255,0.12);
-    --glow-teal: 0 0 12px rgba(59,214,198,0.35), 0 0 30px rgba(59,214,198,0.12);
-    --glow-magenta: 0 0 12px rgba(255,0,170,0.35), 0 0 30px rgba(255,0,170,0.12);
-    --glow-pink: 0 0 12px rgba(221,54,138,0.35), 0 0 30px rgba(221,54,138,0.12);
+    --glow-cyan: 0 0 8px rgba(0,240,255,0.25), 0 0 20px rgba(0,240,255,0.08);
+    --glow-teal: 0 0 8px rgba(59,214,198,0.25), 0 0 20px rgba(59,214,198,0.08);
+    --glow-magenta: 0 0 8px rgba(255,0,170,0.25), 0 0 20px rgba(255,0,170,0.08);
+    --glow-pink: 0 0 8px rgba(221,54,138,0.25), 0 0 20px rgba(221,54,138,0.08);
 }
 
 /* ── Animated background ─────────────────────────────────────── */
@@ -123,7 +123,7 @@ CYBERPUNK_CSS = """
     50% { background-position: 100% 50%; }
 }
 
-/* ── Scan-line overlay ───────────────────────────────────────── */
+/* ── Scan-line overlay (subtle) ──────────────────────────────── */
 .gradio-container::before {
     content: "";
     position: fixed;
@@ -132,8 +132,8 @@ CYBERPUNK_CSS = """
         0deg,
         transparent,
         transparent 2px,
-        rgba(0, 240, 255, 0.015) 2px,
-        rgba(0, 240, 255, 0.015) 4px
+        rgba(0, 240, 255, 0.01) 2px,
+        rgba(0, 240, 255, 0.01) 4px
     );
     pointer-events: none;
     z-index: 9999;
@@ -142,12 +142,12 @@ CYBERPUNK_CSS = """
 /* ── Hero header ─────────────────────────────────────────────── */
 .cyber-hero {
     text-align: center;
-    padding: 2rem 1rem 1.5rem;
+    padding: 2.5rem 1rem 1rem;
     position: relative;
 }
 .cyber-hero h1 {
     font-family: 'JetBrains Mono', monospace !important;
-    font-size: 2.4rem !important;
+    font-size: 2.6rem !important;
     font-weight: 700 !important;
     background: linear-gradient(90deg, var(--neon-cyan), var(--neon-teal), var(--neon-pink), var(--neon-magenta), var(--neon-cyan));
     background-size: 200% auto;
@@ -164,11 +164,14 @@ CYBERPUNK_CSS = """
 }
 .cyber-hero .tagline {
     font-family: 'Inter', sans-serif;
-    font-size: 1rem;
+    font-size: 0.95rem;
     color: var(--text-muted);
-    margin-top: 0.5rem;
-    letter-spacing: 0.15em;
+    margin-top: 0.6rem;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
+}
+.cyber-hero .tagline .yt-hint {
+    color: var(--neon-pink);
 }
 
 /* ── Pipeline steps indicator ────────────────────────────────── */
@@ -177,7 +180,7 @@ CYBERPUNK_CSS = """
     justify-content: center;
     align-items: center;
     gap: 0;
-    padding: 1rem 0 1.5rem;
+    padding: 0.8rem 0 1.2rem;
     flex-wrap: wrap;
 }
 .pipeline-steps .step {
@@ -188,10 +191,16 @@ CYBERPUNK_CSS = """
     border: 1px solid var(--card-border);
     border-radius: 6px;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.78rem;
+    font-size: 0.75rem;
     color: var(--text-muted);
     background: var(--card-bg);
-    transition: all 0.3s ease;
+    transition: all 0.35s ease;
+}
+.pipeline-steps .step:hover {
+    border-color: var(--neon-teal);
+    color: var(--neon-teal);
+    transform: scale(1.03);
+    box-shadow: var(--glow-teal);
 }
 .pipeline-steps .step .num {
     display: inline-flex;
@@ -201,15 +210,15 @@ CYBERPUNK_CSS = """
     border-radius: 50%;
     border: 1px solid var(--neon-teal);
     color: var(--neon-teal);
-    font-size: 0.7rem;
+    font-size: 0.68rem;
     font-weight: 700;
     background: rgba(59, 214, 198, 0.08);
 }
 .pipeline-steps .arrow {
     color: var(--neon-pink);
     font-size: 1rem;
-    padding: 0 0.3rem;
-    opacity: 0.6;
+    padding: 0 0.25rem;
+    opacity: 0.5;
 }
 
 /* ── Section cards ───────────────────────────────────────────── */
@@ -219,11 +228,12 @@ CYBERPUNK_CSS = """
     border-radius: 10px !important;
     padding: 1.2rem !important;
     position: relative;
-    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
 }
 .cyber-card:hover {
-    border-color: rgba(59, 214, 198, 0.3) !important;
+    border-color: rgba(59, 214, 198, 0.25) !important;
     box-shadow: var(--glow-teal);
+    transform: scale(1.005);
 }
 .cyber-card-label {
     font-family: 'JetBrains Mono', monospace !important;
@@ -236,28 +246,36 @@ CYBERPUNK_CSS = """
     border-bottom: 1px solid rgba(0, 240, 255, 0.15);
 }
 
-/* ── Generate button — neon pulse ────────────────────────────── */
+/* ── Generate button — gradient sweep ────────────────────────── */
+#generate-btn {
+    margin-top: 0.5rem;
+}
 #generate-btn button {
     font-family: 'JetBrains Mono', monospace !important;
-    font-size: 1rem !important;
+    font-size: 1.05rem !important;
     font-weight: 700 !important;
     letter-spacing: 0.15em !important;
     text-transform: uppercase !important;
-    padding: 0.9rem 2rem !important;
+    padding: 0.95rem 2rem !important;
     border-radius: 8px !important;
-    animation: neonPulse 2.5s ease-in-out infinite !important;
+    position: relative;
+    overflow: hidden;
     transition: all 0.3s ease !important;
+    background: linear-gradient(90deg, #00f0ff, #3bd6c6, #00f0ff) !important;
+    background-size: 200% 100% !important;
+    animation: gradientSweep 3s ease-in-out infinite !important;
 }
 #generate-btn button:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 0 20px rgba(59,214,198,0.5), 0 0 40px rgba(221,54,138,0.2) !important;
+    transform: translateY(-2px);
+    box-shadow: 0 0 16px rgba(0,240,255,0.4), 0 0 32px rgba(59,214,198,0.2) !important;
 }
-@keyframes neonPulse {
-    0%, 100% { box-shadow: 0 0 8px rgba(0,240,255,0.3), 0 0 20px rgba(0,240,255,0.1); }
-    50% { box-shadow: 0 0 16px rgba(0,240,255,0.5), 0 0 35px rgba(0,240,255,0.2); }
+@keyframes gradientSweep {
+    0% { background-position: 0% center; }
+    50% { background-position: 100% center; }
+    100% { background-position: 0% center; }
 }
 
-/* ── Status output glow ──────────────────────────────────────── */
+/* ── Status output — typing cursor effect ────────────────────── */
 #status-box textarea {
     font-family: 'JetBrains Mono', monospace !important;
     font-size: 0.85rem !important;
@@ -267,11 +285,11 @@ CYBERPUNK_CSS = """
 }
 #status-box.success textarea {
     border-color: #00ff88 !important;
-    box-shadow: 0 0 10px rgba(0,255,136,0.2);
+    box-shadow: 0 0 8px rgba(0,255,136,0.15);
 }
 #status-box.error textarea {
     border-color: #ff3366 !important;
-    box-shadow: 0 0 10px rgba(255,51,102,0.2);
+    box-shadow: 0 0 8px rgba(255,51,102,0.15);
 }
 
 /* ── Audio player dark treatment ─────────────────────────────── */
@@ -305,15 +323,15 @@ CYBERPUNK_CSS = """
 /* ── File upload dashed neon border ──────────────────────────── */
 .cyber-upload .upload-container,
 .cyber-upload [data-testid="droparea"] {
-    border: 2px dashed rgba(0, 240, 255, 0.25) !important;
+    border: 2px dashed rgba(0, 240, 255, 0.2) !important;
     border-radius: 8px !important;
-    background: rgba(0, 240, 255, 0.02) !important;
+    background: rgba(0, 240, 255, 0.015) !important;
     transition: all 0.3s ease;
 }
 .cyber-upload .upload-container:hover,
 .cyber-upload [data-testid="droparea"]:hover {
-    border-color: rgba(59, 214, 198, 0.5) !important;
-    background: rgba(59, 214, 198, 0.04) !important;
+    border-color: rgba(59, 214, 198, 0.45) !important;
+    background: rgba(59, 214, 198, 0.03) !important;
     box-shadow: var(--glow-teal);
 }
 
@@ -326,8 +344,21 @@ CYBERPUNK_CSS = """
     color: var(--text-primary) !important;
 }
 
+/* ── Checkbox group styling ──────────────────────────────────── */
+.output-selector label {
+    font-family: 'JetBrains Mono', monospace !important;
+    font-size: 0.82rem !important;
+    letter-spacing: 0.04em;
+}
+.output-selector .wrap {
+    gap: 0.5rem !important;
+}
+.output-selector input[type="checkbox"] {
+    accent-color: var(--neon-cyan) !important;
+}
+
 /* ── Scrollbar ───────────────────────────────────────────────── */
-::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: var(--dark-bg); }
 ::-webkit-scrollbar-thumb {
     background: linear-gradient(180deg, var(--neon-teal), var(--neon-pink));
@@ -369,13 +400,54 @@ CYBERPUNK_CSS = """
 }
 .gradio-container textarea:focus,
 .gradio-container input[type="text"]:focus {
-    box-shadow: 0 0 8px rgba(0,240,255,0.15) !important;
+    box-shadow: 0 0 6px rgba(0,240,255,0.12) !important;
 }
 
 /* ── Group wrapper ───────────────────────────────────────────── */
 .gradio-group {
     background: transparent !important;
     border: none !important;
+}
+
+/* ── Tabs styling ────────────────────────────────────────────── */
+.gradio-container .tabs .tab-nav button {
+    font-family: 'JetBrains Mono', monospace !important;
+    font-size: 0.82rem !important;
+    letter-spacing: 0.1em !important;
+    text-transform: uppercase !important;
+    color: var(--text-muted) !important;
+    border-bottom: 2px solid transparent !important;
+    transition: all 0.3s ease !important;
+    background: transparent !important;
+    padding: 0.6rem 1.2rem !important;
+}
+.gradio-container .tabs .tab-nav button.selected {
+    color: var(--neon-cyan) !important;
+    border-bottom-color: var(--neon-cyan) !important;
+}
+.gradio-container .tabs .tab-nav button:hover:not(.selected) {
+    color: var(--neon-teal) !important;
+    border-bottom-color: rgba(59, 214, 198, 0.3) !important;
+}
+
+/* ── Results fade-in ─────────────────────────────────────────── */
+@keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.results-section {
+    animation: fadeInUp 0.5s ease-out;
+}
+
+/* ── Downloads row ───────────────────────────────────────────── */
+.download-row {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+.download-row > div {
+    flex: 1;
+    min-width: 180px;
 }
 """
 
@@ -387,7 +459,7 @@ CYBERPUNK_CSS = """
 HERO_HTML = """
 <div class="cyber-hero">
     <h1>LOCAL-NOTEBOOKLM</h1>
-    <p class="tagline">Document to Audio Converter &mdash; Powered by Local AI</p>
+    <p class="tagline">Documents, URLs &amp; <span class="yt-hint">YouTube Videos</span> &rarr; Podcasts &amp; Infographics</p>
 </div>
 """
 
@@ -416,10 +488,10 @@ FOOTER_HTML = """
 
 
 # ---------------------------------------------------------------------------
-# Processing logic  (unchanged)
+# Processing logic
 # ---------------------------------------------------------------------------
 
-def process_podcast(pdf_file, url_input, config_file, format_type, length, style, language, additional_preference, output_dir, skip_to):
+def process_podcast(pdf_file, url_input, config_file, format_type, length, style, language, additional_preference, output_dir, skip_to, outputs_to_generate):
     # Resolve input: URL takes priority over file upload
     if url_input and url_input.strip():
         input_path = url_input.strip()
@@ -439,6 +511,10 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
     except Exception as e:
         return f"Failed to create output directory: {str(e)}", None, "", "", "", None, None, None
 
+    # Validate output selection
+    if not outputs_to_generate:
+        return "Please select at least one output to generate.", None, "", "", "", None, None, None
+
     try:
         if config_file is None:
             config_path = "./example_config.json"
@@ -448,7 +524,10 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
             else:
                 config_path = config_file
 
+        # Build status prefix showing what's being generated
+        selected = ", ".join(outputs_to_generate)
         print(f"Processing with output_dir: {output_dir}")
+        print(f"Generating: {selected}")
 
         success, result = podcast_processor(
             input_path=input_path,
@@ -459,11 +538,17 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
             preference=additional_preference if additional_preference else None,
             output_dir=output_dir,
             language=language,
-            skip_to=skip_to
+            skip_to=skip_to,
+            outputs=outputs_to_generate,
         )
 
         if success:
-            audio_path = os.path.join(output_dir, "podcast.wav")
+            audio_path = None
+            if "Podcast Audio" in outputs_to_generate:
+                candidate = os.path.join(output_dir, "podcast.wav")
+                if os.path.exists(candidate):
+                    audio_path = candidate
+
             file_contents = {}
             generated_files = [
                 "step1/extracted_text.txt",
@@ -501,8 +586,22 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
             if os.path.exists(pptx_path):
                 pptx_file = pptx_path
 
+            # Build success message
+            generated_list = []
+            if audio_path:
+                generated_list.append("Podcast Audio")
+            if infographic_html:
+                generated_list.append("Infographic HTML")
+            png_path = os.path.join(output_dir, "step5", "infographic.png")
+            if os.path.exists(png_path):
+                generated_list.append("Infographic PNG")
+            if pptx_file:
+                generated_list.append("PPTX Slides")
+
+            status_msg = f"Generated: {', '.join(generated_list)}" if generated_list else "Process completed."
+
             return (
-                "Audio Generated Successfully!",
+                status_msg,
                 audio_path,
                 file_contents.get("step1/extracted_text.txt", ""),
                 file_contents.get("step1/clean_extracted_text.txt", ""),
@@ -512,7 +611,7 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
                 pptx_file,
             )
         else:
-            return f"Failed to generate audio: {result}", None, "", "", "", None, None, None
+            return f"Failed: {result}", None, "", "", "", None, None, None
 
     except Exception as e:
         import traceback
@@ -531,115 +630,137 @@ def create_gradio_ui():
 
     theme = _build_cyberpunk_theme()
 
-    with gr.Blocks(title="Local-NotebookLM", analytics_enabled=False, theme=theme, css=CYBERPUNK_CSS) as app:
+    with gr.Blocks(title="Local-NotebookLM", analytics_enabled=False) as app:
 
         # ── Hero ──────────────────────────────────────────────
         gr.HTML(HERO_HTML)
         gr.HTML(PIPELINE_HTML)
 
-        # ── Main two-column layout ───────────────────────────
-        with gr.Row():
-            # ── LEFT: controls ───────────────────────────────
-            with gr.Column(scale=1):
+        # ── Tabbed Layout ─────────────────────────────────────
+        with gr.Tabs():
+            # ══════════════════════════════════════════════════
+            # Tab 1: Create
+            # ══════════════════════════════════════════════════
+            with gr.Tab("Create"):
+                with gr.Row():
+                    # ── LEFT: Input ───────────────────────────
+                    with gr.Column(scale=1):
+                        gr.HTML('<div class="cyber-card-label">// INPUT SOURCE</div>')
+                        with gr.Group(elem_classes="cyber-card"):
+                            pdf_file = gr.File(
+                                label="Document (PDF, DOCX, PPTX, TXT, MD)",
+                                file_types=[".pdf", ".docx", ".pptx", ".txt", ".md"],
+                                elem_classes="cyber-upload",
+                            )
+                            url_input = gr.Textbox(
+                                label="Or Enter URL",
+                                placeholder="https://youtube.com/watch?v=... or any article URL",
+                                info="Supports YouTube videos (auto-extracts transcript), articles, and web pages",
+                            )
+                            config_file = gr.File(
+                                label="Config JSON (Optional)",
+                                file_types=[".json"],
+                                elem_classes="cyber-upload",
+                            )
 
-                # Input source section
-                gr.HTML('<div class="cyber-card-label">// INPUT SOURCE</div>')
-                with gr.Group(elem_classes="cyber-card"):
-                    pdf_file = gr.File(
-                        label="Document (PDF, DOCX, PPTX, TXT, MD)",
-                        file_types=[".pdf", ".docx", ".pptx", ".txt", ".md"],
-                        elem_classes="cyber-upload",
-                    )
-                    url_input = gr.Textbox(
-                        label="Or Enter URL",
-                        placeholder="https://example.com/article",
-                        info="URL takes priority over file upload",
-                    )
-                    config_file = gr.File(
-                        label="Config JSON (Optional)",
-                        file_types=[".json"],
-                        elem_classes="cyber-upload",
-                    )
+                    # ── RIGHT: Settings ───────────────────────
+                    with gr.Column(scale=1):
+                        gr.HTML('<div class="cyber-card-label">// SETTINGS</div>')
+                        with gr.Group(elem_classes="cyber-card"):
+                            with gr.Row():
+                                format_type = gr.Dropdown(
+                                    choices=format_options,
+                                    label="Format",
+                                    value=format_options[0],
+                                )
+                                length = gr.Dropdown(
+                                    choices=length_options,
+                                    label="Length",
+                                    value=length_options[1] if len(length_options) > 1 else length_options[0],
+                                )
+                            with gr.Row():
+                                style = gr.Dropdown(
+                                    choices=style_options,
+                                    label="Style",
+                                    value=style_options[0],
+                                )
+                                language = gr.Dropdown(
+                                    choices=["english", "german", "french", "spanish", "italian", "portuguese"],
+                                    label="Language",
+                                    value="english",
+                                )
 
-                # Format section
-                gr.HTML('<div class="cyber-card-label">// FORMAT</div>')
-                with gr.Group(elem_classes="cyber-card"):
-                    format_type = gr.Dropdown(
-                        choices=format_options,
-                        label="Format",
-                        value=format_options[0],
-                    )
-                    length = gr.Dropdown(
-                        choices=length_options,
-                        label="Length",
-                        value=length_options[1] if len(length_options) > 1 else length_options[0],
-                    )
-                    style = gr.Dropdown(
-                        choices=style_options,
-                        label="Style",
-                        value=style_options[0],
-                    )
-                    language = gr.Dropdown(
-                        choices=["english", "german", "french", "spanish", "italian", "portuguese"],
-                        label="Language",
-                        value="english",
-                    )
+                        gr.HTML('<div class="cyber-card-label">// GENERATE</div>')
+                        with gr.Group(elem_classes="cyber-card"):
+                            outputs_to_generate = gr.CheckboxGroup(
+                                choices=["Podcast Audio", "Infographic HTML", "Infographic PNG", "PPTX Slides"],
+                                value=["Podcast Audio", "Infographic HTML", "Infographic PNG", "PPTX Slides"],
+                                label="Outputs",
+                                info="Select which outputs to produce",
+                                elem_classes="output-selector",
+                            )
 
-                # Advanced section
-                gr.HTML('<div class="cyber-card-label">// ADVANCED</div>')
-                with gr.Group(elem_classes="cyber-card"):
-                    additional_preference = gr.Textbox(
-                        label="Additional Preferences",
-                        placeholder="Focus on key points, provide examples, etc.",
-                    )
-                    output_dir = gr.Textbox(
-                        label="Output Directory",
-                        value="./local_notebooklm/web_ui/output",
-                        placeholder="Path where output files will be saved",
-                    )
-                    skip_to = gr.Dropdown(
-                        choices=SkipToOptions,
-                        label="Skip to Step",
-                        value=None,
-                        info="Start from a later step (skips earlier ones)",
-                    )
+                        with gr.Accordion("Advanced Options", open=False, elem_classes="cyber-accordion"):
+                            with gr.Group(elem_classes="cyber-card"):
+                                additional_preference = gr.Textbox(
+                                    label="Additional Preferences",
+                                    placeholder="Focus on key points, provide examples, etc.",
+                                )
+                                output_dir = gr.Textbox(
+                                    label="Output Directory",
+                                    value="./local_notebooklm/web_ui/output",
+                                    placeholder="Path where output files will be saved",
+                                )
+                                skip_to = gr.Dropdown(
+                                    choices=SkipToOptions,
+                                    label="Skip to Step",
+                                    value=None,
+                                    info="Start from a later step (skips earlier ones)",
+                                )
 
-                # Generate button
+                # ── Generate Button (full width) ──────────────
                 generate_button = gr.Button(
-                    "Generate Podcast",
+                    "Generate",
                     variant="primary",
                     elem_id="generate-btn",
                 )
 
-            # ── RIGHT: outputs ───────────────────────────────
-            with gr.Column(scale=2):
-                gr.HTML('<div class="cyber-card-label">// OUTPUT</div>')
-                with gr.Group(elem_classes="cyber-card"):
-                    result_message = gr.Textbox(
-                        label="Status",
-                        elem_id="status-box",
-                    )
-                    audio_output = gr.Audio(
-                        label="Generated Podcast",
-                        type="filepath",
-                        elem_id="audio-player",
-                    )
+                # ── Status ────────────────────────────────────
+                result_message = gr.Textbox(
+                    label="Status",
+                    elem_id="status-box",
+                )
 
-                gr.HTML('<div class="cyber-card-label">// INFOGRAPHIC</div>')
-                with gr.Group(elem_classes="cyber-card"):
-                    infographic_preview = gr.HTML(label="Infographic Preview")
-                    infographic_download = gr.File(label="Download Infographic HTML")
-                    pptx_download = gr.File(label="Download PPTX Slide Deck")
+                # ── Results ───────────────────────────────────
+                with gr.Group(elem_classes="results-section"):
+                    gr.HTML('<div class="cyber-card-label">// OUTPUT</div>')
+                    with gr.Group(elem_classes="cyber-card"):
+                        audio_output = gr.Audio(
+                            label="Generated Podcast",
+                            type="filepath",
+                            elem_id="audio-player",
+                        )
 
+                    gr.HTML('<div class="cyber-card-label">// INFOGRAPHIC</div>')
+                    with gr.Group(elem_classes="cyber-card"):
+                        infographic_preview = gr.HTML(label="Infographic Preview")
+                        with gr.Row(elem_classes="download-row"):
+                            infographic_download = gr.File(label="Download Infographic HTML")
+                            pptx_download = gr.File(label="Download PPTX Slide Deck")
+
+            # ══════════════════════════════════════════════════
+            # Tab 2: Pipeline Data
+            # ══════════════════════════════════════════════════
+            with gr.Tab("Pipeline Data"):
                 gr.HTML('<div class="cyber-card-label">// PIPELINE DATA</div>')
                 with gr.Group(elem_classes="cyber-card"):
-                    with gr.Accordion("View Extracted Text", open=False, elem_classes="cyber-accordion"):
+                    with gr.Accordion("Extracted Text", open=False, elem_classes="cyber-accordion"):
                         extracted_text = gr.Textbox(label="Extracted Text", lines=10)
 
-                    with gr.Accordion("View Clean Extracted Text", open=False, elem_classes="cyber-accordion"):
+                    with gr.Accordion("Clean Extracted Text", open=False, elem_classes="cyber-accordion"):
                         clean_text = gr.Textbox(label="Clean Extracted Text", lines=10)
 
-                    with gr.Accordion("View Podcast Script", open=False, elem_classes="cyber-accordion"):
+                    with gr.Accordion("Podcast Script", open=True, elem_classes="cyber-accordion"):
                         audio_script = gr.Textbox(label="Podcast Script", lines=15)
 
         # ── Footer ────────────────────────────────────────────
@@ -648,7 +769,7 @@ def create_gradio_ui():
         # ── Wiring ────────────────────────────────────────────
         generate_button.click(
             fn=process_podcast,
-            inputs=[pdf_file, url_input, config_file, format_type, length, style, language, additional_preference, output_dir, skip_to],
+            inputs=[pdf_file, url_input, config_file, format_type, length, style, language, additional_preference, output_dir, skip_to, outputs_to_generate],
             outputs=[result_message, audio_output, extracted_text, clean_text, audio_script, infographic_preview, infographic_download, pptx_download],
         )
 
@@ -656,8 +777,9 @@ def create_gradio_ui():
 
 
 def run_gradio_ui(share=False, port=None):
+    theme = _build_cyberpunk_theme()
     app = create_gradio_ui()
-    app.launch(share=share, server_port=port, server_name="127.0.0.1")
+    app.launch(share=share, server_port=port, server_name="0.0.0.0", theme=theme, css=CYBERPUNK_CSS)
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Run Local-NotebookLM web UI")
