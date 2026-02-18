@@ -150,7 +150,7 @@ def podcast_processor(
                 output_dir=str(output_dirs["step4"])
             )
 
-            print(f"Podcast generation complete! Final audio file: {final_audio_path}")
+            print(f"Audio generation complete! File: {final_audio_path}")
         else:
             final_audio_path = None
 
@@ -176,6 +176,6 @@ def podcast_processor(
         return True, "Process completed successfully (without audio generation)"
 
     except Exception as e:
-        error_msg = f"Error during podcast generation: {str(e)}"
+        error_msg = f"Error during generation: {str(e)}"
         print(error_msg)
         return False, error_msg

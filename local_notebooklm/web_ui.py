@@ -530,43 +530,74 @@ FOOTER_HTML = """
 # Processing logic
 # ---------------------------------------------------------------------------
 
-def process_podcast(pdf_file, url_input, config_file, format_type, length, style, language, additional_preference, output_dir, skip_to, outputs_to_generate):
+def _empty_result(status_msg):
+    """Return a result tuple with only a status message and empty outputs."""
+    return (status_msg, None, "", "", "", None, None, None)
+
+
+def process_podcast(pdf_file, url_input, config_file, format_type, length, style, language, additional_preference, output_dir, skip_to, outputs_to_generate, progress=gr.Progress(track_tqdm=False)):
+    """Generator that yields progress updates then a final result tuple."""
+
     # Resolve input: URL takes priority over file upload
     if url_input and url_input.strip():
         input_path = url_input.strip()
     elif pdf_file is not None:
         input_path = pdf_file.name if hasattr(pdf_file, 'name') else pdf_file
     elif skip_to is not None and skip_to > 1:
-        input_path = None  # skipping step 1, no input needed
+        input_path = None
     else:
-        return "Please upload a document or enter a URL.", None, "", "", "", None, None, None
+        yield _empty_result("Please upload a document or enter a URL.")
+        return
 
     if not output_dir:
         output_dir = "./local_notebooklm/web_ui/output"
 
     try:
         os.makedirs(output_dir, exist_ok=True)
-        print(f"Created output directory: {output_dir}")
     except Exception as e:
-        return f"Failed to create output directory: {str(e)}", None, "", "", "", None, None, None
+        yield _empty_result(f"Failed to create output directory: {str(e)}")
+        return
 
-    # Validate output selection
     if not outputs_to_generate:
-        return "Please select at least one output to generate.", None, "", "", "", None, None, None
+        yield _empty_result("Please select at least one output to generate.")
+        return
 
     try:
         if config_file is None:
             config_path = "./ollama_config.json"
         else:
-            if hasattr(config_file, 'name'):
-                config_path = config_file.name
-            else:
-                config_path = config_file
+            config_path = config_file.name if hasattr(config_file, 'name') else config_file
 
-        # Build status prefix showing what's being generated
         selected = ", ".join(outputs_to_generate)
         print(f"Processing with output_dir: {output_dir}")
         print(f"Generating: {selected}")
+
+        # Determine which steps will run
+        want_audio = "Podcast Audio" in outputs_to_generate
+        want_html = "Infographic HTML" in outputs_to_generate
+        want_png = "Infographic PNG" in outputs_to_generate
+        want_pptx = "PPTX Slides" in outputs_to_generate
+        want_any_infographic = want_html or want_png or want_pptx
+
+        # Calculate total steps for progress bar
+        total_steps = 3  # Steps 1-3 always run
+        if want_audio:
+            total_steps += 1
+        if want_any_infographic:
+            total_steps += 1
+        current_step = 0
+
+        # --- Step 1 ---
+        progress(current_step / total_steps, desc="Step 1/5: Extracting text...")
+        yield _empty_result(f"[Step 1/{total_steps}] Extracting text...")
+
+        # --- Step 2 ---
+        # (progress updated when processor reaches each step — we yield before calling)
+
+        # --- Run the full pipeline ---
+        # We yield status before the blocking call, then update after
+        progress(0.05, desc="Step 1: Extracting text...")
+        yield _empty_result(f"[1/{total_steps}] Extracting text from input...")
 
         success, result = podcast_processor(
             input_path=input_path,
@@ -581,81 +612,75 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
             outputs=outputs_to_generate,
         )
 
-        if success:
-            audio_path = None
-            if "Podcast Audio" in outputs_to_generate:
-                candidate = os.path.join(output_dir, "podcast.wav")
-                if os.path.exists(candidate):
-                    audio_path = candidate
+        if not success:
+            yield _empty_result(f"Failed: {result}")
+            return
 
-            file_contents = {}
-            generated_files = [
-                "step1/extracted_text.txt",
-                "step1/clean_extracted_text.txt",
-                "step2/data.pkl",
-                "step3/podcast_ready_data.pkl",
-                "step3/podcast_ready_data.txt"
-            ]
+        progress(1.0, desc="Complete!")
 
-            for file in generated_files:
-                full_path = os.path.join(output_dir, file)
-                if os.path.exists(full_path) and file.endswith(".txt"):
-                    try:
-                        with open(full_path, 'r', encoding='utf-8') as f:
-                            file_content = f.read()
-                            file_contents[file] = file_content[:1000] + "..." if len(file_content) > 1000 else file_content
-                    except Exception as e:
-                        file_contents[file] = f"Error reading file: {str(e)}"
+        # --- Collect results ---
+        audio_path = None
+        if want_audio:
+            candidate = os.path.join(output_dir, "podcast.wav")
+            if os.path.exists(candidate):
+                audio_path = candidate
 
-            # Load infographic if available
-            infographic_html = None
-            infographic_file = None
-            infographic_path = os.path.join(output_dir, "step5", "infographic.html")
-            if os.path.exists(infographic_path):
+        file_contents = {}
+        for file in ["step1/extracted_text.txt", "step1/clean_extracted_text.txt", "step3/podcast_ready_data.txt"]:
+            full_path = os.path.join(output_dir, file)
+            if os.path.exists(full_path):
                 try:
-                    with open(infographic_path, 'r', encoding='utf-8') as f:
-                        infographic_html = f'<iframe srcdoc="{f.read().replace(chr(34), "&quot;").replace(chr(10), "&#10;")}" style="width:100%;height:600px;border:1px solid #1e1e40;border-radius:8px;" sandbox="allow-same-origin"></iframe>'
-                    infographic_file = infographic_path
-                except Exception:
-                    pass
+                    with open(full_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        file_contents[file] = content[:1000] + "..." if len(content) > 1000 else content
+                except Exception as e:
+                    file_contents[file] = f"Error reading file: {str(e)}"
 
-            # Load PPTX if available
-            pptx_file = None
-            pptx_path = os.path.join(output_dir, "step5", "infographic.pptx")
-            if os.path.exists(pptx_path):
-                pptx_file = pptx_path
+        infographic_html = None
+        infographic_file = None
+        infographic_path = os.path.join(output_dir, "step5", "infographic.html")
+        if os.path.exists(infographic_path):
+            try:
+                with open(infographic_path, 'r', encoding='utf-8') as f:
+                    infographic_html = f'<iframe srcdoc="{f.read().replace(chr(34), "&quot;").replace(chr(10), "&#10;")}" style="width:100%;height:600px;border:1px solid #1e1e40;border-radius:8px;" sandbox="allow-same-origin"></iframe>'
+                infographic_file = infographic_path
+            except Exception:
+                pass
 
-            # Build success message
-            generated_list = []
-            if audio_path:
-                generated_list.append("Podcast Audio")
-            if infographic_html:
-                generated_list.append("Infographic HTML")
-            png_path = os.path.join(output_dir, "step5", "infographic.png")
-            if os.path.exists(png_path):
-                generated_list.append("Infographic PNG")
-            if pptx_file:
-                generated_list.append("PPTX Slides")
+        pptx_file = None
+        pptx_path = os.path.join(output_dir, "step5", "infographic.pptx")
+        if os.path.exists(pptx_path):
+            pptx_file = pptx_path
 
-            status_msg = f"Generated: {', '.join(generated_list)}" if generated_list else "Process completed."
+        # Build success message listing what was actually produced
+        generated_list = []
+        if audio_path:
+            generated_list.append("Audio")
+        if infographic_html:
+            generated_list.append("Infographic HTML")
+        png_path = os.path.join(output_dir, "step5", "infographic.png")
+        if os.path.exists(png_path):
+            generated_list.append("Infographic PNG")
+        if pptx_file:
+            generated_list.append("PPTX")
 
-            return (
-                status_msg,
-                audio_path,
-                file_contents.get("step1/extracted_text.txt", ""),
-                file_contents.get("step1/clean_extracted_text.txt", ""),
-                file_contents.get("step3/podcast_ready_data.txt", ""),
-                infographic_html,
-                infographic_file,
-                pptx_file,
-            )
-        else:
-            return f"Failed: {result}", None, "", "", "", None, None, None
+        status_msg = f"Complete — Generated: {', '.join(generated_list)}" if generated_list else "Complete."
+
+        yield (
+            status_msg,
+            audio_path,
+            file_contents.get("step1/extracted_text.txt", ""),
+            file_contents.get("step1/clean_extracted_text.txt", ""),
+            file_contents.get("step3/podcast_ready_data.txt", ""),
+            infographic_html,
+            infographic_file,
+            pptx_file,
+        )
 
     except Exception as e:
         import traceback
         error_details = traceback.format_exc()
-        return f"An error occurred: {str(e)}\n\nDetails:\n{error_details}", None, "", "", "", None, None, None
+        yield _empty_result(f"An error occurred: {str(e)}\n\nDetails:\n{error_details}")
 
 
 # ---------------------------------------------------------------------------
@@ -772,15 +797,15 @@ def create_gradio_ui():
 
                 # ── Results ───────────────────────────────────
                 with gr.Group(elem_classes="results-section"):
-                    gr.HTML('<div class="cyber-card-label">// OUTPUT</div>')
+                    gr.HTML('<div class="cyber-card-label">// AUDIO OUTPUT</div>')
                     with gr.Group(elem_classes="cyber-card"):
                         audio_output = gr.Audio(
-                            label="Generated Podcast",
+                            label="Audio",
                             type="filepath",
                             elem_id="audio-player",
                         )
 
-                    gr.HTML('<div class="cyber-card-label">// INFOGRAPHIC</div>')
+                    gr.HTML('<div class="cyber-card-label">// INFOGRAPHIC OUTPUT</div>')
                     with gr.Group(elem_classes="cyber-card"):
                         infographic_preview = gr.HTML(label="Infographic Preview")
                         with gr.Row(elem_classes="download-row"):
@@ -811,6 +836,9 @@ def create_gradio_ui():
             inputs=[pdf_file, url_input, config_file, format_type, length, style, language, additional_preference, output_dir, skip_to, outputs_to_generate],
             outputs=[result_message, audio_output, extracted_text, clean_text, audio_script, infographic_preview, infographic_download, pptx_download],
         )
+
+    # Enable queue for progress bar support and session resilience on refresh
+    app.queue()
 
     return app
 
