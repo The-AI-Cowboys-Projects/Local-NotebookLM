@@ -1,8 +1,47 @@
 import os
+import shutil
+import subprocess
+import time
 import gradio as gr
 import argparse
 from local_notebooklm.processor import podcast_processor
 from local_notebooklm.steps.helpers import LengthType, FormatType, StyleType, SkipToOptions
+
+
+# ---------------------------------------------------------------------------
+# Ollama auto-start
+# ---------------------------------------------------------------------------
+
+def _ensure_ollama():
+    """Start Ollama if it isn't already running. Returns True if reachable."""
+    import urllib.request
+    try:
+        urllib.request.urlopen("http://localhost:11434/api/tags", timeout=2)
+        return True
+    except Exception:
+        pass
+
+    if not shutil.which("ollama"):
+        print("[web_ui] Ollama binary not found — skipping auto-start.")
+        return False
+
+    print("[web_ui] Ollama not responding — starting ollama serve ...")
+    subprocess.Popen(
+        ["ollama", "serve"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    for _ in range(15):
+        time.sleep(1)
+        try:
+            urllib.request.urlopen("http://localhost:11434/api/tags", timeout=2)
+            print("[web_ui] Ollama is ready.")
+            return True
+        except Exception:
+            pass
+
+    print("[web_ui] Ollama did not start within 15 seconds.")
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -517,7 +556,7 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
 
     try:
         if config_file is None:
-            config_path = "./example_config.json"
+            config_path = "./ollama_config.json"
         else:
             if hasattr(config_file, 'name'):
                 config_path = config_file.name
@@ -777,6 +816,7 @@ def create_gradio_ui():
 
 
 def run_gradio_ui(share=False, port=None):
+    _ensure_ollama()
     theme = _build_cyberpunk_theme()
     app = create_gradio_ui()
     app.launch(share=share, server_port=port, server_name="0.0.0.0", theme=theme, css=CYBERPUNK_CSS)
