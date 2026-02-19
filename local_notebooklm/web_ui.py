@@ -435,7 +435,119 @@ CYBERPUNK_CSS = """
     100% { left: 100%; }
 }
 
-/* ── Status output ───────────────────────────────────────────── */
+/* ── Progress bar ───────────────────────────────────────────── */
+.progress-hud {
+    border: 1px solid var(--card-border);
+    background: var(--card-bg);
+    padding: 0.8rem 1rem;
+    position: relative;
+    clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut)));
+}
+.progress-steps {
+    display: flex;
+    gap: 0;
+    margin-bottom: 0.6rem;
+}
+.progress-step {
+    flex: 1;
+    height: 4px;
+    background: var(--panel-border);
+    position: relative;
+    transition: background 0.5s ease;
+}
+.progress-step.done {
+    background: var(--neon-cyan);
+    box-shadow: 0 0 6px rgba(0,240,255,0.4);
+}
+.progress-step.active {
+    background: linear-gradient(90deg, var(--neon-cyan), var(--neon-teal));
+    animation: progressPulse 1.5s ease-in-out infinite;
+}
+@keyframes progressPulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 6px rgba(0,240,255,0.3); }
+    50% { opacity: 0.7; box-shadow: 0 0 12px rgba(0,240,255,0.6); }
+}
+.progress-step + .progress-step { margin-left: 3px; }
+.progress-text {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+    color: var(--text-primary);
+    letter-spacing: 0.04em;
+}
+.progress-eta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.68rem;
+    color: var(--neon-teal);
+    float: right;
+}
+.progress-complete {
+    color: var(--neon-cyan);
+    text-shadow: 0 0 8px rgba(0,240,255,0.3);
+}
+
+/* ── Waveform container ────────────────────────────────────── */
+.waveform-wrap {
+    border: 1px solid var(--card-border);
+    background: var(--card-bg);
+    padding: 0.4rem;
+    margin-top: 0.4rem;
+    min-height: 48px;
+    position: relative;
+    overflow: hidden;
+}
+.waveform-bars {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    height: 40px;
+}
+.waveform-bars .bar {
+    width: 3px;
+    background: linear-gradient(180deg, var(--neon-cyan), var(--neon-teal));
+    border-radius: 1px;
+    animation: waveBar 1.2s ease-in-out infinite;
+    opacity: 0.7;
+}
+@keyframes waveBar {
+    0%, 100% { transform: scaleY(0.3); }
+    50% { transform: scaleY(1); }
+}
+
+/* ── Regen button ──────────────────────────────────────────── */
+#regen-audio-btn button {
+    font-family: 'JetBrains Mono', monospace !important;
+    font-size: 0.72rem !important;
+    letter-spacing: 0.08em !important;
+    text-transform: uppercase !important;
+    border: 1px solid rgba(0,240,255,0.25) !important;
+    background: rgba(0,240,255,0.04) !important;
+    color: var(--neon-cyan) !important;
+}
+#regen-audio-btn button:hover {
+    border-color: var(--neon-cyan) !important;
+    box-shadow: var(--glow-cyan);
+}
+
+/* ── Keyboard hint ─────────────────────────────────────────── */
+.kbd-hint {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.6rem;
+    color: var(--text-muted);
+    text-align: center;
+    padding: 0.3rem 0;
+    letter-spacing: 0.06em;
+    opacity: 0.6;
+}
+.kbd-hint kbd {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    padding: 0.1rem 0.35rem;
+    font-size: 0.58rem;
+    color: var(--neon-teal);
+}
+
+/* ── Status output (legacy compat) ─────────────────────────── */
 #status-box textarea {
     font-family: 'JetBrains Mono', monospace !important;
     font-size: 0.82rem !important;
@@ -811,7 +923,7 @@ _notebook_mgr = NotebookManager()
 # ---------------------------------------------------------------------------
 
 def _load_results_from_dir(d: str):
-    """Scan a directory for pipeline outputs and return an 8-tuple.
+    """Scan a directory for pipeline outputs and return a 9-tuple.
 
     Returns ``None`` when nothing is found.
     """
@@ -1017,6 +1129,54 @@ def _format_eta(elapsed_per_step: list[float], current_step: int, total_steps: i
     return f"ETA: ~{mins}m {secs}s"
 
 
+def _build_progress_html(step: int, total: int, message: str, eta: str = "",
+                         complete: bool = False) -> str:
+    """Build HUD-style progress bar HTML."""
+    if complete:
+        return (
+            '<div class="progress-hud">'
+            '<div class="progress-steps">'
+            + ''.join(f'<div class="progress-step done"></div>' for _ in range(total))
+            + '</div>'
+            f'<span class="progress-text progress-complete">{message}</span>'
+            '</div>'
+        )
+    if step == 0 or total == 0:
+        return (
+            '<div class="progress-hud">'
+            f'<span class="progress-text">{message}</span>'
+            '</div>'
+        )
+    bars = []
+    for i in range(1, total + 1):
+        if i < step:
+            bars.append('<div class="progress-step done"></div>')
+        elif i == step:
+            bars.append('<div class="progress-step active"></div>')
+        else:
+            bars.append('<div class="progress-step"></div>')
+    eta_span = f'<span class="progress-eta">{eta}</span>' if eta else ""
+    return (
+        '<div class="progress-hud">'
+        f'<div class="progress-steps">{"".join(bars)}</div>'
+        f'<span class="progress-text">[{step}/{total}] {message}</span>{eta_span}'
+        '</div>'
+    )
+
+
+def _build_waveform_html(n_bars: int = 60) -> str:
+    """Build a CSS-animated waveform visualization."""
+    import random
+    bars = []
+    for i in range(n_bars):
+        h = random.randint(15, 100)
+        delay = round(random.uniform(0, 1.2), 2)
+        bars.append(
+            f'<div class="bar" style="height:{h}%;animation-delay:{delay}s"></div>'
+        )
+    return '<div class="waveform-wrap"><div class="waveform-bars">' + ''.join(bars) + '</div></div>'
+
+
 def _empty_outputs():
     """9-tuple of empty/cleared outputs."""
     return ("", None, "", "", "", None, None, None, None)
@@ -1025,12 +1185,13 @@ def _empty_outputs():
 def _on_notebook_switch(notebook_id):
     """Load sources, results, and settings for the selected notebook.
 
-    Returns updates for (18 values):
+    Returns updates for (21 values):
       sources_display, source_selector, source_content_viewer,
-      result_message, audio_output, extracted_text,
+      progress_display, audio_output, extracted_text,
       clean_text, audio_script, infographic_preview, infographic_download,
       png_preview, pptx_download,
-      format, length, style, language, outputs_to_generate, output_dir
+      format, length, style, language, outputs_to_generate, output_dir,
+      host_voice, cohost_voice, temperature
     """
     if not notebook_id:
         return (
@@ -1041,6 +1202,7 @@ def _on_notebook_switch(notebook_id):
             "podcast", "medium", "normal", "english",
             ["Podcast Audio", "Infographic HTML", "Infographic PNG", "PPTX Slides"],
             "",
+            "", "", 0.7,
         )
 
     _notebook_mgr.set_default_notebook_id(notebook_id)
@@ -1066,6 +1228,9 @@ def _on_notebook_switch(notebook_id):
         settings.get("language", "english"),
         settings.get("outputs_to_generate", ["Podcast Audio", "Infographic HTML", "Infographic PNG", "PPTX Slides"]),
         nb_dir,
+        settings.get("host_voice", ""),
+        settings.get("cohost_voice", ""),
+        settings.get("temperature", 0.7),
     )
 
 
@@ -1143,7 +1308,8 @@ def _on_url_add(url, notebook_id):
     )
 
 
-def _on_settings_change(notebook_id, fmt, length, style, lang, outputs):
+def _on_settings_change(notebook_id, fmt, length, style, lang, outputs,
+                        host_voice, cohost_voice, temperature):
     """Silently save settings to notebook metadata."""
     if not notebook_id:
         return
@@ -1153,6 +1319,9 @@ def _on_settings_change(notebook_id, fmt, length, style, lang, outputs):
         "style": style,
         "language": lang,
         "outputs_to_generate": outputs,
+        "host_voice": host_voice or "",
+        "cohost_voice": cohost_voice or "",
+        "temperature": temperature if temperature is not None else 0.7,
     })
 
 
@@ -1193,6 +1362,167 @@ def _on_app_load():
     return default_id
 
 
+def _on_regen_audio(edited_script, notebook_id, config_file, host_voice, cohost_voice):
+    """Re-generate audio from an edited podcast script (Step 4 only).
+
+    Writes the edited text back to step3 output, then runs step4.
+    Yields progress then final result (progress_html, audio, waveform).
+    """
+    if not edited_script or not edited_script.strip():
+        yield _build_progress_html(0, 0, "No script to re-generate."), None, ""
+        return
+    if not notebook_id:
+        yield _build_progress_html(0, 0, "No notebook selected."), None, ""
+        return
+
+    import json as _json, pickle
+    from pathlib import Path as _Path
+    from local_notebooklm.config import validate_config, base_config
+    from local_notebooklm.steps.helpers import set_provider
+    from local_notebooklm.steps.step4 import step4
+
+    nb_dir = _notebook_mgr.get_notebook_dir(notebook_id)
+    step3_dir = _Path(nb_dir) / "step3"
+    step4_dir = _Path(nb_dir) / "step4"
+    step3_dir.mkdir(parents=True, exist_ok=True)
+    step4_dir.mkdir(parents=True, exist_ok=True)
+
+    # Write edited script to step3 output
+    pkl_path = step3_dir / "podcast_ready_data.pkl"
+    txt_path = step3_dir / "podcast_ready_data.txt"
+    with open(pkl_path, 'wb') as f:
+        pickle.dump(edited_script, f)
+    with open(txt_path, 'w', encoding='utf-8') as f:
+        f.write(edited_script)
+
+    # Load config
+    if config_file is not None:
+        config_path = config_file.name if hasattr(config_file, 'name') else config_file
+        with open(config_path, 'r') as f:
+            config = _json.load(f)
+    else:
+        ollama_cfg = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "ollama_config.json",
+        )
+        if os.path.exists(ollama_cfg):
+            with open(ollama_cfg, 'r') as f:
+                config = _json.load(f)
+        else:
+            config = base_config
+
+    # Apply voice overrides
+    if host_voice and host_voice.strip():
+        config["Host-Speaker-Voice"] = host_voice.strip()
+    if cohost_voice and cohost_voice.strip():
+        config["Co-Host-Speaker-1-Voice"] = cohost_voice.strip()
+
+    yield _build_progress_html(1, 1, "Re-generating audio from edited script..."), None, ""
+
+    try:
+        tts_client = set_provider(config=config["Text-To-Speech-Model"]["provider"])
+        step4(
+            client=tts_client,
+            config=config,
+            input_dir=str(step3_dir),
+            output_dir=str(step4_dir),
+        )
+
+        audio_path = None
+        for ext in ["wav", "mp3", "ogg", "flac", "aac"]:
+            candidate = os.path.join(str(step4_dir), f"podcast.{ext}")
+            if os.path.exists(candidate):
+                audio_path = candidate
+                break
+
+        waveform = _build_waveform_html() if audio_path else ""
+        yield (
+            _build_progress_html(1, 1, "Audio re-generated", complete=True),
+            audio_path,
+            waveform,
+        )
+    except Exception as e:
+        yield _build_progress_html(0, 0, f"Re-gen failed: {e}"), None, ""
+
+
+def _on_export_notebook(notebook_id):
+    """Export notebook as zip.  Returns file path for download."""
+    if not notebook_id:
+        return None
+    import tempfile
+    nb = _notebook_mgr.get_notebook(notebook_id)
+    name_safe = nb.get("name", "notebook").replace(" ", "_").replace("/", "_")
+    dest = os.path.join(tempfile.gettempdir(), f"{name_safe}.zip")
+    return _notebook_mgr.export_notebook(notebook_id, dest)
+
+
+def _on_import_notebook(zip_file):
+    """Import a notebook from zip.  Returns updated dropdown + selected value."""
+    if zip_file is None:
+        return gr.update(), gr.update()
+    file_path = zip_file.name if hasattr(zip_file, "name") else zip_file
+    nb_id = _notebook_mgr.import_notebook(file_path)
+    choices = _dropdown_choices()
+    return gr.update(choices=choices, value=nb_id), gr.update(value=None)
+
+
+def _process_batch(config_file, format_type, length, style, language,
+                   additional_preference, skip_to, outputs_to_generate,
+                   notebook_id, host_voice, cohost_voice, temperature):
+    """Process ALL sources in the notebook sequentially.
+
+    Yields (progress_html, audio, extracted, clean, script, infographic,
+            infographic_file, png, pptx) like process_podcast.
+    """
+    if not notebook_id:
+        yield _empty_result(_build_progress_html(0, 0, "No notebook selected."))
+        return
+
+    sources = _notebook_mgr.get_sources(notebook_id)
+    if not sources:
+        yield _empty_result(_build_progress_html(0, 0, "No sources to process."))
+        return
+
+    nb_dir = _notebook_mgr.get_notebook_dir(notebook_id)
+    total_sources = len(sources)
+    last_result = None
+
+    for src_idx, src in enumerate(sources):
+        # Resolve input path for this source
+        if src.get("type") == "file":
+            input_path = os.path.join(nb_dir, "sources", src["filename"])
+            if not os.path.exists(input_path):
+                continue
+        elif src.get("type") == "url":
+            input_path = src["url"]
+        else:
+            continue
+
+        src_label = src.get("filename", src.get("url", "unknown"))
+        yield _empty_result(
+            _build_progress_html(
+                src_idx + 1, total_sources,
+                f"Batch [{src_idx+1}/{total_sources}]: {src_label}"
+            )
+        )
+
+        # Run the full pipeline for this source using process_podcast
+        for result in process_podcast(
+            None, input_path if src.get("type") == "url" else None,
+            config_file, format_type, length, style, language,
+            additional_preference, nb_dir, skip_to, outputs_to_generate,
+            notebook_id, host_voice, cohost_voice, temperature,
+            _source_file_override=input_path if src.get("type") == "file" else None,
+        ):
+            last_result = result
+            yield result
+
+    if last_result:
+        yield last_result
+    else:
+        yield _empty_result(_build_progress_html(0, 0, "No processable sources found."))
+
+
 # ---------------------------------------------------------------------------
 # Processing logic
 # ---------------------------------------------------------------------------
@@ -1204,17 +1534,19 @@ def _empty_result(status_msg):
 
 def process_podcast(pdf_file, url_input, config_file, format_type, length, style,
                     language, additional_preference, output_dir, skip_to,
-                    outputs_to_generate, notebook_id):
+                    outputs_to_generate, notebook_id,
+                    host_voice="", cohost_voice="", temperature=0.7,
+                    _source_file_override=None):
     """Generator that yields step-by-step progress then a final result tuple."""
 
     # ── Resolve input source ─────────────────────────────────
-    # Priority: fresh URL > fresh file upload > notebook stored sources
-    input_path = None
-    if url_input and url_input.strip():
+    # Priority: override > fresh URL > fresh file upload > notebook stored sources
+    input_path = _source_file_override
+    if input_path is None and url_input and url_input.strip():
         input_path = url_input.strip()
-    elif pdf_file is not None:
+    elif input_path is None and pdf_file is not None:
         input_path = pdf_file.name if hasattr(pdf_file, 'name') else pdf_file
-    elif notebook_id:
+    elif input_path is None and notebook_id:
         sources = _notebook_mgr.get_sources(notebook_id)
         nb_dir = _notebook_mgr.get_notebook_dir(notebook_id)
         for src in sources:
@@ -1281,6 +1613,17 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
             yield _empty_result(f"Invalid configuration: {e}")
             return
 
+        # ── Apply UI overrides (voice, temperature) ──────────
+        if host_voice and str(host_voice).strip():
+            config["Host-Speaker-Voice"] = str(host_voice).strip()
+        if cohost_voice and str(cohost_voice).strip():
+            config["Co-Host-Speaker-1-Voice"] = str(cohost_voice).strip()
+        if temperature is not None:
+            temp_val = float(temperature)
+            for step_key in ["Step1", "Step2", "Step3"]:
+                if step_key in config:
+                    config[step_key]["temperature"] = temp_val
+
         # ── Determine outputs & total steps ──────────────────
         want_audio = "Podcast Audio" in outputs_to_generate
         want_html = "Infographic HTML" in outputs_to_generate
@@ -1327,9 +1670,8 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
 
         # ── Step 1: Extract text ─────────────────────────────
         current_step += 1
-        pct = int((current_step - 1) / total_steps * 100)
         eta = _format_eta(step_times, current_step, total_steps)
-        yield _empty_result(f"[Step {current_step}/{total_steps}] {pct}% — Extracting text from document... {eta}")
+        yield _empty_result(_build_progress_html(current_step, total_steps, "Extracting text from document...", eta))
         step_start = time.time()
 
         if not skip_to or skip_to <= 1:
@@ -1351,9 +1693,8 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
         # ── Step 2: Generate transcript ──────────────────────
         step_times.append(time.time() - step_start)
         current_step += 1
-        pct = int((current_step - 1) / total_steps * 100)
         eta = _format_eta(step_times, current_step, total_steps)
-        yield _empty_result(f"[Step {current_step}/{total_steps}] {pct}% — Generating transcript... {eta}")
+        yield _empty_result(_build_progress_html(current_step, total_steps, "Generating transcript...", eta))
         step_start = time.time()
 
         if not skip_to or skip_to <= 2:
@@ -1379,9 +1720,8 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
         # ── Step 3: Optimize for TTS ─────────────────────────
         step_times.append(time.time() - step_start)
         current_step += 1
-        pct = int((current_step - 1) / total_steps * 100)
         eta = _format_eta(step_times, current_step, total_steps)
-        yield _empty_result(f"[Step {current_step}/{total_steps}] {pct}% — Optimizing for text-to-speech... {eta}")
+        yield _empty_result(_build_progress_html(current_step, total_steps, "Optimizing for text-to-speech...", eta))
         step_start = time.time()
 
         if not skip_to or skip_to <= 3:
@@ -1399,9 +1739,8 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
         step_times.append(time.time() - step_start)
         if want_audio:
             current_step += 1
-            pct = int((current_step - 1) / total_steps * 100)
             eta = _format_eta(step_times, current_step, total_steps)
-            yield _empty_result(f"[Step {current_step}/{total_steps}] {pct}% — Generating audio... {eta}")
+            yield _empty_result(_build_progress_html(current_step, total_steps, "Generating audio...", eta))
             step_start = time.time()
 
             if not skip_to or skip_to <= 4:
@@ -1417,9 +1756,8 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
             step_times.append(time.time() - step_start)
         if want_any_infographic:
             current_step += 1
-            pct = int((current_step - 1) / total_steps * 100)
             eta = _format_eta(step_times, current_step, total_steps)
-            yield _empty_result(f"[Step {current_step}/{total_steps}] {pct}% — Generating infographic... {eta}")
+            yield _empty_result(_build_progress_html(current_step, total_steps, "Generating infographic...", eta))
             step_start = time.time()
 
             if not skip_to or skip_to <= 5:
@@ -1495,7 +1833,8 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
         if pptx_file:
             generated.append("PPTX")
 
-        status_msg = f"Complete — 100% — Generated: {', '.join(generated)}" if generated else "Complete — 100%"
+        gen_label = f"Generated: {', '.join(generated)}" if generated else "Complete"
+        status_msg = _build_progress_html(total_steps, total_steps, gen_label, complete=True)
 
         yield (
             status_msg,
@@ -1549,6 +1888,8 @@ def create_gradio_ui():
             )
             btn_new = gr.Button("+ New", size="sm", variant="secondary", elem_classes="nb-btn", scale=0)
             btn_rename = gr.Button("Rename", size="sm", variant="secondary", elem_classes="nb-btn", scale=0)
+            btn_export = gr.Button("Export", size="sm", variant="secondary", elem_classes="nb-btn", scale=0)
+            btn_import = gr.Button("Import", size="sm", variant="secondary", elem_classes="nb-btn", scale=0)
             btn_delete = gr.Button("Delete", size="sm", variant="stop", elem_classes="nb-btn", scale=0)
 
         # ── 3-Panel layout ────────────────────────────────────
@@ -1606,19 +1947,20 @@ def create_gradio_ui():
             # ═══════════════════════════════════════════════
             with gr.Column(scale=2, min_width=400, elem_classes="panel"):
 
-                # Status bar
-                result_message = gr.Textbox(
-                    label="Status",
-                    elem_id="status-box",
+                # Progress display (HUD bar)
+                progress_display = gr.HTML(
+                    value="",
+                    elem_id="progress-display",
                 )
 
-                # Audio output
+                # Audio output + waveform
                 with gr.Group(elem_classes="results-section"):
                     audio_output = gr.Audio(
                         label="Podcast Audio",
                         type="filepath",
                         elem_id="audio-player",
                     )
+                    waveform_display = gr.HTML(value="", elem_id="waveform-area")
 
                 # Infographic preview
                 infographic_preview = gr.HTML(label="Infographic Preview")
@@ -1634,13 +1976,23 @@ def create_gradio_ui():
                     type="filepath",
                 )
 
-                # Pipeline data (collapsed)
+                # Pipeline data (collapsed) — script is editable
                 with gr.Accordion("Extracted Text", open=False, elem_classes="cyber-accordion"):
                     extracted_text = gr.Textbox(label="Extracted Text", lines=8)
                 with gr.Accordion("Clean Text", open=False, elem_classes="cyber-accordion"):
                     clean_text = gr.Textbox(label="Clean Extracted Text", lines=8)
-                with gr.Accordion("Podcast Script", open=False, elem_classes="cyber-accordion"):
-                    audio_script = gr.Textbox(label="Podcast Script", lines=10)
+                with gr.Accordion("Podcast Script (editable)", open=False, elem_classes="cyber-accordion"):
+                    audio_script = gr.Textbox(
+                        label="Podcast Script",
+                        lines=10,
+                        interactive=True,
+                        info="Edit the script then click Re-generate Audio",
+                    )
+                    btn_regen_audio = gr.Button(
+                        "Re-generate Audio from Script",
+                        variant="secondary",
+                        elem_id="regen-audio-btn",
+                    )
 
             # ═══════════════════════════════════════════════
             # RIGHT PANEL — Studio
@@ -1682,15 +2034,41 @@ def create_gradio_ui():
                             value="english",
                         )
 
+                    # Temperature
+                    temperature_slider = gr.Slider(
+                        minimum=0.0,
+                        maximum=2.0,
+                        value=0.7,
+                        step=0.1,
+                        label="Creativity",
+                        info="Lower = precise, Higher = creative",
+                    )
+
                     # Generate button
                     generate_button = gr.Button(
                         "Generate",
                         variant="primary",
                         elem_id="generate-btn",
                     )
+                    btn_batch = gr.Button(
+                        "Batch All Sources",
+                        variant="secondary",
+                        size="sm",
+                    )
+                    gr.HTML('<p class="kbd-hint"><kbd>Ctrl</kbd>+<kbd>Enter</kbd> to generate</p>')
 
-                    # Advanced options
-                    with gr.Accordion("Advanced", open=False, elem_classes="cyber-accordion"):
+                    # Voice & advanced options
+                    with gr.Accordion("Voice & Advanced", open=False, elem_classes="cyber-accordion"):
+                        host_voice = gr.Textbox(
+                            label="Host Voice",
+                            placeholder="e.g. af_alloy",
+                            info="TTS voice ID for Speaker 1",
+                        )
+                        cohost_voice = gr.Textbox(
+                            label="Co-Host Voice",
+                            placeholder="e.g. af_sky+af_bella",
+                            info="TTS voice ID for Speaker 2",
+                        )
                         additional_preference = gr.Textbox(
                             label="Preferences",
                             placeholder="Focus on key points, provide examples...",
@@ -1706,19 +2084,43 @@ def create_gradio_ui():
                             value=None,
                         )
 
-                    gr.HTML('<p class="panel-empty">Select outputs and click Generate</p>')
-
         # ── Footer ────────────────────────────────────────────
         gr.HTML(FOOTER_HTML)
 
-        # ── All output components (order matches _on_notebook_switch — 18) ──
+        # ── Hidden components for export / import ────────────
+        with gr.Row(visible=False):
+            export_download = gr.File(label="Export Download", visible=False)
+        import_file = gr.File(
+            label="Import Notebook (.zip)",
+            file_types=[".zip"],
+            visible=False,
+        )
+
+        # ── Keyboard shortcut JS ─────────────────────────────
+        gr.HTML("""
+        <script>
+        document.addEventListener('keydown', function(e) {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                var btn = document.querySelector('#generate-btn button');
+                if (btn) btn.click();
+            }
+            if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'N') {
+                e.preventDefault();
+                var nbBtn = document.querySelectorAll('.nb-btn button');
+                if (nbBtn.length > 0) nbBtn[0].click();
+            }
+        });
+        </script>
+        """)
+
         switch_outputs = [
             sources_display, source_selector, source_content_viewer,
-            result_message, audio_output, extracted_text, clean_text,
+            progress_display, audio_output, extracted_text, clean_text,
             audio_script, infographic_preview, infographic_download,
             png_preview, pptx_download,
             format_type, length, style, language, outputs_to_generate,
-            output_dir,
+            output_dir, host_voice, cohost_voice, temperature_slider,
         ]
 
         # ── Wiring — Notebook bar ─────────────────────────────
@@ -1791,23 +2193,89 @@ def create_gradio_ui():
         )
 
         # ── Wiring — Auto-save settings on change ────────────
-        for setting_component in [format_type, length, style, language, outputs_to_generate]:
+        for setting_component in [format_type, length, style, language,
+                                  outputs_to_generate, host_voice, cohost_voice,
+                                  temperature_slider]:
             setting_component.change(
                 fn=_on_settings_change,
-                inputs=[notebook_selector, format_type, length, style, language, outputs_to_generate],
+                inputs=[notebook_selector, format_type, length, style, language,
+                        outputs_to_generate, host_voice, cohost_voice,
+                        temperature_slider],
                 outputs=None,
                 show_progress="hidden",
             )
 
         # ── Wiring — Generate ─────────────────────────────────
+        generate_inputs = [
+            pdf_file, url_input, config_file, format_type, length, style,
+            language, additional_preference, output_dir, skip_to,
+            outputs_to_generate, notebook_selector,
+            host_voice, cohost_voice, temperature_slider,
+        ]
+        generate_outputs = [
+            progress_display, audio_output, extracted_text, clean_text,
+            audio_script, infographic_preview, infographic_download,
+            png_preview, pptx_download,
+        ]
+
         generate_button.click(
             fn=process_podcast,
-            inputs=[pdf_file, url_input, config_file, format_type, length, style,
-                    language, additional_preference, output_dir, skip_to,
-                    outputs_to_generate, notebook_selector],
-            outputs=[result_message, audio_output, extracted_text, clean_text,
-                     audio_script, infographic_preview, infographic_download,
-                     png_preview, pptx_download],
+            inputs=generate_inputs,
+            outputs=generate_outputs,
+            show_progress="hidden",
+        )
+
+        # ── Wiring — Batch all sources ───────────────────────
+        btn_batch.click(
+            fn=_process_batch,
+            inputs=[config_file, format_type, length, style, language,
+                    additional_preference, skip_to, outputs_to_generate,
+                    notebook_selector, host_voice, cohost_voice, temperature_slider],
+            outputs=generate_outputs,
+            show_progress="hidden",
+        )
+
+        # ── Wiring — Re-generate audio from edited script ────
+        btn_regen_audio.click(
+            fn=_on_regen_audio,
+            inputs=[audio_script, notebook_selector, config_file,
+                    host_voice, cohost_voice],
+            outputs=[progress_display, audio_output, waveform_display],
+            show_progress="hidden",
+        )
+
+        # ── Wiring — Export / Import ─────────────────────────
+        btn_export.click(
+            fn=_on_export_notebook,
+            inputs=[notebook_selector],
+            outputs=[export_download],
+            show_progress="hidden",
+        )
+
+        btn_import.click(
+            fn=lambda: gr.update(visible=True),
+            inputs=None,
+            outputs=[import_file],
+            show_progress="hidden",
+        )
+
+        import_file.change(
+            fn=_on_import_notebook,
+            inputs=[import_file],
+            outputs=[notebook_selector, import_file],
+            show_progress="hidden",
+        ).then(
+            fn=_on_notebook_switch,
+            inputs=[notebook_selector],
+            outputs=switch_outputs,
+            show_progress="hidden",
+        )
+
+        # ── Wiring — Audio waveform on playback ───────────────
+        audio_output.change(
+            fn=lambda a: _build_waveform_html() if a else "",
+            inputs=[audio_output],
+            outputs=[waveform_display],
             show_progress="hidden",
         )
 

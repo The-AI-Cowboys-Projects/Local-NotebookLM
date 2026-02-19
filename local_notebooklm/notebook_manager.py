@@ -318,3 +318,68 @@ class NotebookManager:
         self._assert_exists(notebook_id)
         meta = self._load_metadata(notebook_id)
         return meta.get("settings", dict(_DEFAULT_SETTINGS))
+
+    # ------------------------------------------------------------------
+    # Public API — Export / Import
+    # ------------------------------------------------------------------
+
+    def export_notebook(self, notebook_id: str, dest_path: str) -> str:
+        """Export a notebook as a .zip archive.  Returns the zip file path."""
+        import zipfile
+
+        self._assert_exists(notebook_id)
+        nb_dir = self._notebook_dir(notebook_id)
+
+        if not dest_path.endswith(".zip"):
+            dest_path += ".zip"
+
+        with zipfile.ZipFile(dest_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for root, _dirs, files in os.walk(nb_dir):
+                for fname in files:
+                    abs_path = os.path.join(root, fname)
+                    arc_name = os.path.relpath(abs_path, nb_dir)
+                    zf.write(abs_path, arc_name)
+        return dest_path
+
+    def import_notebook(self, zip_path: str, name: str | None = None) -> str:
+        """Import a notebook from a .zip archive.  Returns the new notebook id."""
+        import zipfile
+
+        nb_id = uuid.uuid4().hex[:12]
+        nb_dir = self._notebook_dir(nb_id)
+        os.makedirs(nb_dir, exist_ok=True)
+
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            zf.extractall(nb_dir)
+
+        # Determine name: use provided, or from metadata, or fallback
+        meta_path = self._metadata_path(nb_id)
+        if os.path.exists(meta_path):
+            meta = _read_json(meta_path)
+        else:
+            meta = {
+                "name": "Imported Notebook",
+                "created_at": _now_iso(),
+                "updated_at": _now_iso(),
+                "sources": [],
+                "settings": dict(_DEFAULT_SETTINGS),
+            }
+
+        if name:
+            meta["name"] = name
+        elif "name" not in meta:
+            meta["name"] = "Imported Notebook"
+
+        meta["updated_at"] = _now_iso()
+        _atomic_write_json(meta_path, meta)
+
+        # Register
+        reg = self._load_registry()
+        reg["notebooks"].insert(0, {
+            "id": nb_id,
+            "name": meta["name"],
+            "created_at": _now_iso(),
+        })
+        reg["default_notebook_id"] = nb_id
+        self._save_registry(reg)
+        return nb_id
