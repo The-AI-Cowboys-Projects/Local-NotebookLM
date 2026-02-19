@@ -1,3 +1,4 @@
+import logging as _logging
 import os
 import shutil
 import subprocess
@@ -6,6 +7,8 @@ import gradio as gr
 import argparse
 from local_notebooklm.steps.helpers import LengthType, FormatType, StyleType, SkipToOptions
 from local_notebooklm.notebook_manager import NotebookManager
+
+_log = _logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -1031,8 +1034,6 @@ _notebook_mgr = NotebookManager()
 # Generation state (shared across callbacks)
 # ---------------------------------------------------------------------------
 
-import logging as _logging
-
 _last_failed_step: int | None = None
 _last_log_text: str = ""
 
@@ -1096,9 +1097,10 @@ _PRESETS: dict[str, dict] = {
 # ---------------------------------------------------------------------------
 
 def _check_provider_health() -> str:
-    """Test LLM/TTS endpoints, return HTML banner (empty string if all OK)."""
+    """Test LLM/TTS endpoints + optional deps, return HTML banner (empty if all OK)."""
     import urllib.request
-    checks = []
+    checks = []  # (name, ok)
+    warnings = []  # text strings
 
     # Ollama LLM
     try:
@@ -1114,7 +1116,19 @@ def _check_provider_health() -> str:
     except Exception:
         checks.append(("Kokoro TTS", False))
 
-    if all(ok for _, ok in checks):
+    # Optional dependency checks
+    try:
+        import docling  # noqa: F401
+    except ImportError:
+        warnings.append("Docling not installed — PDF extraction will use PyPDF2 (lower quality)")
+
+    try:
+        import trafilatura  # noqa: F401
+    except ImportError:
+        warnings.append("trafilatura not installed — URL extraction will fall back to BeautifulSoup")
+
+    all_ok = all(ok for _, ok in checks) and not warnings
+    if all_ok:
         return ""
 
     items = []
@@ -1123,11 +1137,24 @@ def _check_provider_health() -> str:
         dot = "&#x25CF;"
         items.append(f'<span style="color:{color};margin-right:12px">{dot} {name}</span>')
 
+    warn_html = ""
+    if warnings:
+        warn_items = "".join(f"<li>{w}</li>" for w in warnings)
+        warn_html = (
+            f'<ul style="margin:4px 0 0;padding-left:18px;font-size:11px;'
+            f'color:var(--text-muted);list-style:disc">{warn_items}</ul>'
+        )
+
+    provider_msg = ""
+    if not all(ok for _, ok in checks):
+        provider_msg = (
+            '<span style="color:var(--text-muted);margin-left:8px">'
+            '&mdash; some providers offline, generation may fail</span>'
+        )
+
     return (
         '<div class="health-banner">'
-        f'{"".join(items)}'
-        '<span style="color:var(--text-muted);margin-left:8px">'
-        '&mdash; some providers offline, generation may fail</span>'
+        f'{"".join(items)}{provider_msg}{warn_html}'
         '</div>'
     )
 
@@ -1162,8 +1189,8 @@ def _load_results_from_dir(d: str):
                 with open(fp, 'r', encoding='utf-8') as f:
                     c = f.read()
                     file_contents[rel] = c[:1000] + "..." if len(c) > 1000 else c
-            except Exception:
-                pass
+            except Exception as e:
+                _log.warning("Failed to read pipeline output %s: %s", rel, e)
 
     infographic_html = None
     infographic_file = None
@@ -1173,8 +1200,8 @@ def _load_results_from_dir(d: str):
             with open(infographic_path, 'r', encoding='utf-8') as f:
                 infographic_html = f'<iframe srcdoc="{f.read().replace(chr(34), "&quot;").replace(chr(10), "&#10;")}" style="width:100%;height:600px;border:1px solid #1e1e40;border-radius:8px;" sandbox="allow-same-origin"></iframe>'
             infographic_file = infographic_path
-        except Exception:
-            pass
+        except Exception as e:
+            _log.warning("Failed to read infographic HTML: %s", e)
 
     png_image = None
     png_path = os.path.join(d, "step5", "infographic.png")
@@ -1378,16 +1405,38 @@ def _build_progress_html(step: int, total: int, message: str, eta: str = "",
     )
 
 
-def _build_waveform_html(n_bars: int = 60) -> str:
-    """Build a CSS-animated waveform visualization."""
-    import random
+def _build_waveform_html(audio_path: str | None = None, n_bars: int = 80) -> str:
+    """Build waveform visualization from real audio data (or fallback to random)."""
+    heights = []
+    if audio_path and os.path.exists(audio_path):
+        try:
+            import numpy as np
+            import soundfile as sf
+            data, _sr = sf.read(audio_path)
+            if data.ndim > 1:
+                data = data.mean(axis=1)
+            # Downsample to n_bars buckets via RMS per bucket
+            bucket_size = max(1, len(data) // n_bars)
+            for i in range(n_bars):
+                chunk = data[i * bucket_size:(i + 1) * bucket_size]
+                if len(chunk) == 0:
+                    break
+                rms = float(np.sqrt(np.mean(chunk ** 2)))
+                heights.append(rms)
+            # Normalize to 10-100% range
+            peak = max(heights) if heights else 1.0
+            if peak > 0:
+                heights = [max(10, int((h / peak) * 100)) for h in heights]
+        except Exception as e:
+            _log.warning("Could not compute real waveform: %s", e)
+            heights = []
+    # Fallback: random heights
+    if not heights:
+        import random
+        heights = [random.randint(15, 100) for _ in range(n_bars)]
     bars = []
-    for i in range(n_bars):
-        h = random.randint(15, 100)
-        delay = round(random.uniform(0, 1.2), 2)
-        bars.append(
-            f'<div class="bar" style="height:{h}%;animation-delay:{delay}s"></div>'
-        )
+    for h in heights:
+        bars.append(f'<div class="bar" style="height:{h}%"></div>')
     return '<div class="waveform-wrap"><div class="waveform-bars">' + ''.join(bars) + '</div></div>'
 
 
@@ -1445,6 +1494,25 @@ def _on_preset_select(preset_name):
     )
 
 
+def _on_download_script(script_text, notebook_id):
+    """Export the podcast script as a Markdown file.  Returns a file path for gr.File."""
+    if not script_text or not script_text.strip():
+        return None
+    import tempfile, ast
+    md_lines = ["# Podcast Script\n"]
+    try:
+        parsed = ast.literal_eval(script_text)
+        if isinstance(parsed, list):
+            for speaker, text in parsed:
+                md_lines.append(f"**{speaker}:** {text}\n")
+    except Exception:
+        md_lines.append(script_text)
+    tmp = tempfile.NamedTemporaryFile(suffix=".md", prefix="podcast_script_", delete=False, mode="w")
+    tmp.write("\n".join(md_lines))
+    tmp.close()
+    return tmp.name
+
+
 def _post_generate(notebook_id):
     """Called after generation finishes.  Updates log viewer, history, and retry button."""
     global _last_log_text, _last_failed_step
@@ -1454,8 +1522,8 @@ def _post_generate(notebook_id):
         try:
             history = _notebook_mgr.get_history(notebook_id)
             history_html = _build_history_html(history)
-        except Exception:
-            pass
+        except Exception as e:
+            _log.warning("Failed to load generation history: %s", e)
     retry_visible = gr.update(visible=(_last_failed_step is not None))
     return log_html, history_html, retry_visible
 
@@ -1593,10 +1661,24 @@ def _on_file_upload(file, notebook_id):
     )
 
 
-def _on_url_add(url, notebook_id):
-    """Record URL in notebook metadata.
+def _check_url_reachable(url: str) -> str | None:
+    """HEAD-request a URL. Returns None if OK, or a warning string."""
+    import urllib.request, urllib.error
+    try:
+        req = urllib.request.Request(url, method="HEAD",
+                                     headers={"User-Agent": "Local-NotebookLM/1.0"})
+        urllib.request.urlopen(req, timeout=8)
+        return None
+    except urllib.error.HTTPError as e:
+        return f"URL returned HTTP {e.code}"
+    except Exception as e:
+        return f"URL unreachable: {e}"
 
-    Returns: sources HTML, cleared URL input, source_selector update, cleared viewer.
+
+def _on_url_add(url, notebook_id):
+    """Record URL in notebook metadata after reachability check.
+
+    Returns: sources HTML, URL input (cleared or kept with warning), source_selector update, viewer.
     """
     if not url or not url.strip() or not notebook_id:
         sources = _notebook_mgr.get_sources(notebook_id) if notebook_id else []
@@ -1606,7 +1688,19 @@ def _on_url_add(url, notebook_id):
             gr.update(choices=_source_dropdown_choices(sources)),
             "",
         )
-    _notebook_mgr.add_url_source(notebook_id, url.strip())
+    clean_url = url.strip()
+    # Reachability check
+    warning = _check_url_reachable(clean_url)
+    if warning:
+        _log.warning("URL check failed for %s: %s", clean_url, warning)
+        sources = _notebook_mgr.get_sources(notebook_id)
+        return (
+            _build_sources_html(sources),
+            clean_url,
+            gr.update(choices=_source_dropdown_choices(sources)),
+            f"[Warning: {warning} — URL was NOT added. Check the address and try again.]",
+        )
+    _notebook_mgr.add_url_source(notebook_id, clean_url)
     sources = _notebook_mgr.get_sources(notebook_id)
     return (
         _build_sources_html(sources),
@@ -1654,8 +1748,8 @@ def _on_remove_source(index, notebook_id):
         )
     try:
         _notebook_mgr.remove_source(notebook_id, index)
-    except (IndexError, KeyError):
-        pass
+    except (IndexError, KeyError) as e:
+        _log.warning("Failed to remove source index %s: %s", index, e)
     sources = _notebook_mgr.get_sources(notebook_id)
     return (
         _build_sources_html(sources),
@@ -1743,7 +1837,7 @@ def _on_regen_audio(edited_script, notebook_id, config_file, host_voice, cohost_
                 audio_path = candidate
                 break
 
-        waveform = _build_waveform_html() if audio_path else ""
+        waveform = _build_waveform_html(audio_path) if audio_path else ""
         yield (
             _build_progress_html(1, 1, "Audio re-generated", complete=True),
             audio_path,
@@ -1894,6 +1988,19 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
     if not outputs_to_generate:
         yield _empty_result("Please select at least one output to generate.")
         return
+
+    # ── Disk space check ─────────────────────────────────
+    try:
+        disk = shutil.disk_usage(output_dir)
+        free_mb = disk.free / (1024 * 1024)
+        if free_mb < 500:
+            yield _empty_result(
+                f"Low disk space: {free_mb:.0f} MB free. At least 500 MB recommended. "
+                "Free up space before generating."
+            )
+            return
+    except Exception:
+        pass  # disk_usage may not work on all platforms
 
     try:
         # ── Load config ──────────────────────────────────────
@@ -2087,7 +2194,7 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
                         generate_pptx=want_pptx,
                     )
                 except Exception as e:
-                    print(f"Step 5 (infographic) failed (non-fatal): {e}")
+                    _log.warning("Step 5 (infographic) failed (non-fatal): %s", e)
 
         # ── Collect results ──────────────────────────────────
         audio_path = None
@@ -2109,8 +2216,8 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
                     with open(full_path, 'r', encoding='utf-8') as f:
                         content = f.read()
                         file_contents[rel] = content[:1000] + "..." if len(content) > 1000 else content
-                except Exception:
-                    pass
+                except Exception as e:
+                    _log.warning("Failed to read pipeline output %s: %s", rel, e)
 
         infographic_html = None
         infographic_file = None
@@ -2125,8 +2232,8 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
                         f' sandbox="allow-same-origin"></iframe>'
                     )
                 infographic_file = infographic_path
-            except Exception:
-                pass
+            except Exception as e:
+                _log.warning("Failed to read infographic HTML: %s", e)
 
         png_image = None
         png_path = os.path.join(output_dir, "step5", "infographic.png")
@@ -2340,11 +2447,20 @@ def create_gradio_ui():
                         interactive=True,
                         info="Edit the script then click Re-generate Audio",
                     )
-                    btn_regen_audio = gr.Button(
-                        "Re-generate Audio from Script",
-                        variant="secondary",
-                        elem_id="regen-audio-btn",
-                    )
+                    with gr.Row():
+                        btn_regen_audio = gr.Button(
+                            "Re-generate Audio from Script",
+                            variant="secondary",
+                            elem_id="regen-audio-btn",
+                            scale=3,
+                        )
+                        btn_download_script = gr.Button(
+                            "Download Script (.md)",
+                            variant="secondary",
+                            size="sm",
+                            scale=1,
+                        )
+                    script_download_file = gr.File(visible=False)
 
                 # Pipeline log viewer
                 with gr.Accordion("Pipeline Logs", open=False, elem_classes="cyber-accordion"):
@@ -2669,6 +2785,14 @@ def create_gradio_ui():
             show_progress="hidden",
         )
 
+        # ── Wiring — Download script as Markdown ──────────────
+        btn_download_script.click(
+            fn=_on_download_script,
+            inputs=[audio_script, notebook_selector],
+            outputs=[script_download_file],
+            show_progress="hidden",
+        )
+
         # ── Wiring — Export / Import ─────────────────────────
         btn_export.click(
             fn=_on_export_notebook,
@@ -2698,7 +2822,7 @@ def create_gradio_ui():
 
         # ── Wiring — Audio waveform on playback ───────────────
         audio_output.change(
-            fn=lambda a: _build_waveform_html() if a else "",
+            fn=lambda a: _build_waveform_html(a) if a else "",
             inputs=[audio_output],
             outputs=[waveform_display],
             show_progress="hidden",
