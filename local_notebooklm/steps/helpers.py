@@ -11,6 +11,8 @@ logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 3
 RETRY_BASE_DELAY = 2  # seconds; doubles each attempt
+LLM_TIMEOUT = 120  # seconds — per-request timeout for LLM calls
+TTS_TIMEOUT = 180  # seconds — TTS can be slower for long segments
 
 
 FormatType = Literal[
@@ -87,29 +89,35 @@ def set_provider(
     
     api_key = config.get("key") if config else None
     
+    timeout = config.get("timeout", LLM_TIMEOUT) if config else LLM_TIMEOUT
+
     if provider_name == "openai":
         if api_key is None:
             raise ValueError("API key is required for OpenAI provider.")
         client = OpenAI(
             api_key=api_key,
+            timeout=timeout,
         )
         return client
     elif provider_name == "lmstudio":
         client = OpenAI(
             base_url='http://localhost:1234/v1',
             api_key=api_key,
+            timeout=timeout,
         )
         return client
     elif provider_name == "ollama":
         client = OpenAI(
             base_url='http://localhost:11434/v1',
             api_key=api_key,
+            timeout=timeout,
         )
         return client
     elif provider_name == "groq":
         client = OpenAI(
             base_url='https://api.groq.com/openai/v1',
             api_key=api_key,
+            timeout=timeout,
         )
         return client
     elif provider_name == "azure":
@@ -151,10 +159,20 @@ def set_provider(
         client = OpenAI(
             base_url=base_url,
             api_key=api_key,
+            timeout=timeout,
         )
         return client
     else:
         raise ValueError(f"Unsupported provider: {provider_name}")
+
+
+def _is_rate_limit_error(e: Exception) -> bool:
+    """Detect HTTP 429 rate-limit errors across providers."""
+    err_str = str(e).lower()
+    if "429" in err_str or "rate" in err_str and "limit" in err_str:
+        return True
+    # OpenAI SDK raises openai.RateLimitError
+    return type(e).__name__ == "RateLimitError"
 
 
 def _call_llm(client, messages, model, max_tokens, temperature) -> str:
@@ -238,12 +256,21 @@ def generate_text(
 
         except Exception as e:
             last_error = e
+            # Detect rate limiting (HTTP 429) for smarter backoff
+            is_rate_limit = _is_rate_limit_error(e)
             if attempt < MAX_RETRIES:
                 delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
-                logger.warning(f"generate_text attempt {attempt}/{MAX_RETRIES} failed: {e}. Retrying in {delay}s...")
+                if is_rate_limit:
+                    delay = max(delay, 10)  # Wait at least 10s on rate limit
+                    logger.warning(f"Rate limited (429). Waiting {delay}s before retry {attempt + 1}/{MAX_RETRIES}...")
+                else:
+                    logger.warning(f"generate_text attempt {attempt}/{MAX_RETRIES} failed: {e}. Retrying in {delay}s...")
                 time.sleep(delay)
             else:
-                logger.error(f"generate_text failed after {MAX_RETRIES} attempts: {e}")
+                if is_rate_limit:
+                    logger.error(f"Rate limited after {MAX_RETRIES} retries. Try a different provider or wait.")
+                else:
+                    logger.error(f"generate_text failed after {MAX_RETRIES} attempts: {e}")
 
     raise RuntimeError(f"generate_text failed after {MAX_RETRIES} attempts: {last_error}")
 
@@ -281,9 +308,14 @@ def generate_speech(
 
         except Exception as e:
             last_error = e
+            is_rate_limit = _is_rate_limit_error(e)
             if attempt < MAX_RETRIES:
                 delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
-                logger.warning(f"generate_speech attempt {attempt}/{MAX_RETRIES} failed: {e}. Retrying in {delay}s...")
+                if is_rate_limit:
+                    delay = max(delay, 10)
+                    logger.warning(f"TTS rate limited (429). Waiting {delay}s before retry {attempt + 1}/{MAX_RETRIES}...")
+                else:
+                    logger.warning(f"generate_speech attempt {attempt}/{MAX_RETRIES} failed: {e}. Retrying in {delay}s...")
                 time.sleep(delay)
             else:
                 logger.error(f"generate_speech failed after {MAX_RETRIES} attempts: {e}")

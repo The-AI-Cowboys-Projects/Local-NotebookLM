@@ -54,9 +54,32 @@ def _atomic_write_json(path: str, data: dict | list) -> None:
     os.replace(tmp, path)
 
 
+import logging as _logging
+
+_log = _logging.getLogger(__name__)
+
+
 def _read_json(path: str) -> dict | list:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def _safe_read_json(path: str, fallback: dict | list | None = None) -> dict | list:
+    """Read JSON with corruption recovery.  Returns *fallback* on error."""
+    try:
+        return _read_json(path)
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        _log.warning("Corrupted JSON at %s: %s — using fallback", path, e)
+        if fallback is not None:
+            _atomic_write_json(path, fallback)
+            return fallback
+        raise
+    except FileNotFoundError:
+        if fallback is not None:
+            _log.warning("Missing file %s — recreating from defaults", path)
+            _atomic_write_json(path, fallback)
+            return fallback
+        raise
 
 
 class NotebookManager:
@@ -76,7 +99,8 @@ class NotebookManager:
     # ------------------------------------------------------------------
 
     def _load_registry(self) -> dict:
-        return _read_json(self._registry_path)
+        fallback = {"notebooks": [], "default_notebook_id": ""}
+        return _safe_read_json(self._registry_path, fallback)
 
     def _save_registry(self, registry: dict) -> None:
         _atomic_write_json(self._registry_path, registry)
@@ -123,7 +147,14 @@ class NotebookManager:
         return os.path.join(self._notebook_dir(notebook_id), "metadata.json")
 
     def _load_metadata(self, notebook_id: str) -> dict:
-        return _read_json(self._metadata_path(notebook_id))
+        fallback = {
+            "name": "Recovered Notebook",
+            "created_at": _now_iso(),
+            "updated_at": _now_iso(),
+            "sources": [],
+            "settings": dict(_DEFAULT_SETTINGS),
+        }
+        return _safe_read_json(self._metadata_path(notebook_id), fallback)
 
     def _save_metadata(self, notebook_id: str, meta: dict) -> None:
         meta["updated_at"] = _now_iso()
