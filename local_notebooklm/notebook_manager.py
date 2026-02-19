@@ -320,6 +320,24 @@ class NotebookManager:
         return meta.get("settings", dict(_DEFAULT_SETTINGS))
 
     # ------------------------------------------------------------------
+    # Public API — Generation history
+    # ------------------------------------------------------------------
+
+    def add_history_entry(self, notebook_id: str, entry: dict) -> None:
+        """Append a generation run to the notebook's history (newest first, max 20)."""
+        self._assert_exists(notebook_id)
+        meta = self._load_metadata(notebook_id)
+        history = meta.get("history", [])
+        history.insert(0, entry)
+        meta["history"] = history[:20]
+        self._save_metadata(notebook_id, meta)
+
+    def get_history(self, notebook_id: str) -> list[dict]:
+        self._assert_exists(notebook_id)
+        meta = self._load_metadata(notebook_id)
+        return meta.get("history", [])
+
+    # ------------------------------------------------------------------
     # Public API — Export / Import
     # ------------------------------------------------------------------
 

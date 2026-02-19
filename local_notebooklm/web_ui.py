@@ -878,6 +878,115 @@ CYBERPUNK_CSS = """
     border-color: var(--neon-red) !important;
     box-shadow: 0 0 8px rgba(255,58,58,0.2);
 }
+
+/* ── Health banner ─────────────────────────────────── */
+.health-banner {
+    background: rgba(255,58,58,0.06);
+    border: 1px solid rgba(255,58,58,0.25);
+    padding: 8px 16px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: #ff8888;
+    clip-path: polygon(0 0,100% 0,99.5% 100%,0.5% 100%);
+}
+
+/* ── Preset pills ──────────────────────────────────── */
+#preset-selector .wrap { gap: 4px !important; }
+#preset-selector label {
+    font-size: 11px !important;
+    padding: 3px 10px !important;
+    border-radius: 0 !important;
+    clip-path: polygon(4px 0,100% 0,calc(100% - 4px) 100%,0 100%);
+}
+
+/* ── Stop button ───────────────────────────────────── */
+#stop-btn button {
+    background: rgba(255,58,58,0.08) !important;
+    border: 1px solid rgba(255,58,58,0.3) !important;
+    color: #ff6666 !important;
+}
+#stop-btn button:hover {
+    background: rgba(255,58,58,0.15) !important;
+    border-color: var(--neon-red) !important;
+}
+
+/* ── Retry button ──────────────────────────────────── */
+#retry-btn button {
+    background: rgba(255,165,0,0.08) !important;
+    border: 1px solid rgba(255,165,0,0.3) !important;
+    color: #ffaa44 !important;
+}
+#retry-btn button:hover {
+    background: rgba(255,165,0,0.15) !important;
+    border-color: #ffaa44 !important;
+}
+
+/* ── Log viewer ────────────────────────────────────── */
+.log-viewer {
+    margin-top: 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+}
+.log-viewer summary {
+    cursor: pointer;
+    color: var(--text-muted);
+    padding: 4px 0;
+}
+.log-viewer pre {
+    max-height: 200px;
+    overflow-y: auto;
+    background: rgba(0,0,0,0.4);
+    padding: 8px;
+    border: 1px solid #1e1e40;
+    color: #8888aa;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+/* ── History timeline ──────────────────────────────── */
+.history-timeline { display: flex; flex-direction: column; gap: 6px; }
+.history-empty { color: var(--text-muted); font-size: 12px; padding: 8px 0; }
+.hist-entry {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 6px 10px;
+    border-left: 2px solid var(--neon-teal);
+    background: rgba(0,240,255,0.02);
+    font-family: var(--font-mono);
+    font-size: 11px;
+}
+.hist-entry.fail { border-left-color: var(--neon-red); background: rgba(255,58,58,0.02); }
+.hist-ts { color: var(--text-muted); min-width: 120px; }
+.hist-badge {
+    background: rgba(0,240,255,0.08);
+    padding: 1px 6px;
+    color: var(--neon-cyan);
+}
+.hist-dur { color: var(--text-muted); }
+.hist-out { color: var(--neon-teal); }
+.hist-err { color: #ff6666; font-size: 10px; width: 100%; }
+
+/* ── Notebook tabs (Radio styled as tabs) ──────────── */
+#notebook-tabs .wrap {
+    gap: 0 !important;
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+}
+#notebook-tabs label {
+    border-radius: 0 !important;
+    border: 1px solid #1e1e40 !important;
+    border-bottom: 2px solid transparent !important;
+    padding: 6px 14px !important;
+    font-family: var(--font-mono) !important;
+    font-size: 11px !important;
+    color: var(--text-muted) !important;
+    background: transparent !important;
+    white-space: nowrap;
+}
+#notebook-tabs label.selected, #notebook-tabs input:checked + label {
+    border-bottom-color: var(--neon-cyan) !important;
+    color: var(--neon-cyan) !important;
+    background: rgba(0,240,255,0.04) !important;
+}
 """
 
 
@@ -916,6 +1025,111 @@ FOOTER_HTML = """
 # ---------------------------------------------------------------------------
 
 _notebook_mgr = NotebookManager()
+
+
+# ---------------------------------------------------------------------------
+# Generation state (shared across callbacks)
+# ---------------------------------------------------------------------------
+
+import logging as _logging
+
+_last_failed_step: int | None = None
+_last_log_text: str = ""
+
+
+class _LogCapture(_logging.Handler):
+    """Capture log records during a pipeline run for display in the UI."""
+
+    def __init__(self):
+        super().__init__()
+        self.records: list[str] = []
+        self.setLevel(_logging.INFO)
+        self.setFormatter(_logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S"))
+
+    def emit(self, record):
+        self.records.append(self.format(record))
+
+    def get_text(self) -> str:
+        return "\n".join(self.records)
+
+
+# ---------------------------------------------------------------------------
+# Settings presets
+# ---------------------------------------------------------------------------
+
+_PRESETS: dict[str, dict] = {
+    "Custom": {},
+    "Quick Summary": {
+        "format": "summary", "length": "short", "style": "professional",
+        "temperature": 0.5,
+    },
+    "Casual Chat": {
+        "format": "podcast", "length": "medium", "style": "casual",
+        "temperature": 0.8,
+    },
+    "Academic Lecture": {
+        "format": "lecture", "length": "long", "style": "academic",
+        "temperature": 0.4,
+    },
+    "News Brief": {
+        "format": "news-report", "length": "short", "style": "professional",
+        "temperature": 0.3,
+    },
+    "Deep Dive Panel": {
+        "format": "panel-discussion", "length": "very-long", "style": "technical",
+        "temperature": 0.7,
+    },
+    "Storytelling": {
+        "format": "storytelling", "length": "long", "style": "friendly",
+        "temperature": 0.9,
+    },
+    "Gen-Z Explainer": {
+        "format": "explainer", "length": "medium", "style": "gen-z",
+        "temperature": 1.0,
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+# Provider health check
+# ---------------------------------------------------------------------------
+
+def _check_provider_health() -> str:
+    """Test LLM/TTS endpoints, return HTML banner (empty string if all OK)."""
+    import urllib.request
+    checks = []
+
+    # Ollama LLM
+    try:
+        urllib.request.urlopen("http://localhost:11434/api/tags", timeout=3)
+        checks.append(("Ollama LLM", True))
+    except Exception:
+        checks.append(("Ollama LLM", False))
+
+    # Kokoro TTS
+    try:
+        urllib.request.urlopen("http://localhost:8880/v1/models", timeout=3)
+        checks.append(("Kokoro TTS", True))
+    except Exception:
+        checks.append(("Kokoro TTS", False))
+
+    if all(ok for _, ok in checks):
+        return ""
+
+    items = []
+    for name, ok in checks:
+        color = "var(--neon-teal)" if ok else "var(--neon-red, #ff3a3a)"
+        dot = "&#x25CF;"
+        items.append(f'<span style="color:{color};margin-right:12px">{dot} {name}</span>')
+
+    return (
+        '<div class="health-banner">'
+        f'{"".join(items)}'
+        '<span style="color:var(--text-muted);margin-left:8px">'
+        '&mdash; some providers offline, generation may fail</span>'
+        '</div>'
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1177,6 +1391,94 @@ def _build_waveform_html(n_bars: int = 60) -> str:
     return '<div class="waveform-wrap"><div class="waveform-bars">' + ''.join(bars) + '</div></div>'
 
 
+def _build_log_html(log_text: str) -> str:
+    """Build collapsible log viewer HTML."""
+    if not log_text:
+        return ""
+    escaped = (log_text.replace("&", "&amp;").replace("<", "&lt;")
+               .replace(">", "&gt;").replace('"', "&quot;"))
+    return (
+        '<details class="log-viewer"><summary>Pipeline Logs</summary>'
+        f'<pre>{escaped}</pre></details>'
+    )
+
+
+def _build_history_html(history: list[dict]) -> str:
+    """Build generation history timeline HTML."""
+    if not history:
+        return '<div class="history-empty">No generation history yet.</div>'
+    items = []
+    for entry in history[:10]:
+        ts = entry.get("timestamp", "")[:19].replace("T", " ")
+        fmt = entry.get("format", "?")
+        style = entry.get("style", "?")
+        length = entry.get("length", "?")
+        dur = entry.get("duration_s", 0)
+        status = entry.get("status", "unknown")
+        status_cls = "done" if status == "success" else "fail"
+        outputs = ", ".join(entry.get("outputs", [])) or "none"
+        error = entry.get("error", "")
+        err_html = f'<div class="hist-err">{error[:120]}</div>' if error else ""
+        items.append(
+            f'<div class="hist-entry {status_cls}">'
+            f'<span class="hist-ts">{ts}</span>'
+            f'<span class="hist-badge">{fmt} / {style} / {length}</span>'
+            f'<span class="hist-dur">{dur:.0f}s</span>'
+            f'<span class="hist-out">{outputs}</span>'
+            f'{err_html}'
+            f'</div>'
+        )
+    return '<div class="history-timeline">' + "".join(items) + '</div>'
+
+
+def _on_preset_select(preset_name):
+    """Apply a settings preset.  Returns updates for format, length, style, language, temperature."""
+    p = _PRESETS.get(preset_name, {})
+    if not p:
+        return gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
+    return (
+        gr.update(value=p.get("format")) if "format" in p else gr.update(),
+        gr.update(value=p.get("length")) if "length" in p else gr.update(),
+        gr.update(value=p.get("style")) if "style" in p else gr.update(),
+        gr.update(value=p.get("language")) if "language" in p else gr.update(),
+        gr.update(value=p.get("temperature")) if "temperature" in p else gr.update(),
+    )
+
+
+def _post_generate(notebook_id):
+    """Called after generation finishes.  Updates log viewer, history, and retry button."""
+    global _last_log_text, _last_failed_step
+    log_html = _build_log_html(_last_log_text)
+    history_html = ""
+    if notebook_id:
+        try:
+            history = _notebook_mgr.get_history(notebook_id)
+            history_html = _build_history_html(history)
+        except Exception:
+            pass
+    retry_visible = gr.update(visible=(_last_failed_step is not None))
+    return log_html, history_html, retry_visible
+
+
+def _on_retry(pdf_file, url_input, config_file, format_type, length, style,
+              language, additional_preference, output_dir, skip_to,
+              outputs_to_generate, notebook_id,
+              host_voice, cohost_voice, temperature):
+    """Re-run the pipeline, skipping to the last failed step."""
+    global _last_failed_step
+    retry_step = _last_failed_step
+    if retry_step is None:
+        yield _empty_result("No failed step to retry.")
+        return
+    _last_failed_step = None
+    yield from process_podcast(
+        pdf_file, url_input, config_file, format_type, length, style,
+        language, additional_preference, output_dir, retry_step,
+        outputs_to_generate, notebook_id,
+        host_voice, cohost_voice, temperature,
+    )
+
+
 def _empty_outputs():
     """9-tuple of empty/cleared outputs."""
     return ("", None, "", "", "", None, None, None, None)
@@ -1185,13 +1487,14 @@ def _empty_outputs():
 def _on_notebook_switch(notebook_id):
     """Load sources, results, and settings for the selected notebook.
 
-    Returns updates for (21 values):
+    Returns updates for (23 values):
       sources_display, source_selector, source_content_viewer,
       progress_display, audio_output, extracted_text,
       clean_text, audio_script, infographic_preview, infographic_download,
       png_preview, pptx_download,
       format, length, style, language, outputs_to_generate, output_dir,
-      host_voice, cohost_voice, temperature
+      host_voice, cohost_voice, temperature,
+      log_viewer, history_display
     """
     if not notebook_id:
         return (
@@ -1203,6 +1506,7 @@ def _on_notebook_switch(notebook_id):
             ["Podcast Audio", "Infographic HTML", "Infographic PNG", "PPTX Slides"],
             "",
             "", "", 0.7,
+            "", "",
         )
 
     _notebook_mgr.set_default_notebook_id(notebook_id)
@@ -1216,6 +1520,8 @@ def _on_notebook_switch(notebook_id):
     results = _load_results_from_dir(nb_dir)
     if results is None:
         results = _empty_outputs()
+
+    history_html = _build_history_html(_notebook_mgr.get_history(notebook_id))
 
     return (
         sources_html,
@@ -1231,6 +1537,8 @@ def _on_notebook_switch(notebook_id):
         settings.get("host_voice", ""),
         settings.get("cohost_voice", ""),
         settings.get("temperature", 0.7),
+        "",
+        history_html,
     )
 
 
@@ -1538,6 +1846,13 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
                     host_voice="", cohost_voice="", temperature=0.7,
                     _source_file_override=None):
     """Generator that yields step-by-step progress then a final result tuple."""
+    global _last_failed_step, _last_log_text
+    _last_failed_step = None
+
+    # Install log capture for this run
+    capture = _LogCapture()
+    _logging.getLogger("local_notebooklm").addHandler(capture)
+    gen_start = time.time()
 
     # ── Resolve input source ─────────────────────────────────
     # Priority: override > fresh URL > fresh file upload > notebook stored sources
@@ -1836,6 +2151,20 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
         gen_label = f"Generated: {', '.join(generated)}" if generated else "Complete"
         status_msg = _build_progress_html(total_steps, total_steps, gen_label, complete=True)
 
+        # Record success in history
+        _last_log_text = capture.get_text()
+        _logging.getLogger("local_notebooklm").removeHandler(capture)
+        if notebook_id:
+            from datetime import datetime, timezone
+            _notebook_mgr.add_history_entry(notebook_id, {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "format": format_type, "length": length, "style": style,
+                "language": language,
+                "duration_s": round(time.time() - gen_start, 1),
+                "status": "success",
+                "outputs": generated,
+            })
+
         yield (
             status_msg,
             audio_path,
@@ -1850,7 +2179,27 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
 
     except Exception as e:
         import traceback
-        yield _empty_result(f"An error occurred: {str(e)}\n\nDetails:\n{traceback.format_exc()}")
+        # Determine which step failed for retry
+        _last_failed_step = current_step
+        _last_log_text = capture.get_text()
+        _logging.getLogger("local_notebooklm").removeHandler(capture)
+
+        if notebook_id:
+            from datetime import datetime, timezone
+            _notebook_mgr.add_history_entry(notebook_id, {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "format": format_type, "length": length, "style": style,
+                "language": language,
+                "duration_s": round(time.time() - gen_start, 1),
+                "status": "failed",
+                "outputs": [],
+                "error": str(e)[:200],
+            })
+
+        yield _empty_result(
+            _build_progress_html(0, 0, f"Step {_last_failed_step or '?'} failed: {e}")
+            + f'\n<details><summary>Full traceback</summary><pre>{traceback.format_exc()}</pre></details>'
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1870,16 +2219,19 @@ def create_gradio_ui():
 
         # ── Header bar ────────────────────────────────────────
         gr.HTML(HEADER_HTML)
+        health_banner = gr.HTML(value="", elem_id="health-banner")
 
-        # ── Notebook bar ──────────────────────────────────────
+        # ── Notebook tabs ─────────────────────────────────────
+        notebook_selector = gr.Radio(
+            choices=initial_choices,
+            value=initial_default,
+            label="",
+            elem_id="notebook-tabs",
+            container=False,
+        )
+
+        # ── Notebook actions bar ──────────────────────────────
         with gr.Row(elem_classes="notebook-bar"):
-            notebook_selector = gr.Dropdown(
-                choices=initial_choices,
-                value=initial_default,
-                label="Notebook",
-                scale=3,
-                container=False,
-            )
             notebook_name_input = gr.Textbox(
                 placeholder="notebook name...",
                 scale=2,
@@ -1994,6 +2346,14 @@ def create_gradio_ui():
                         elem_id="regen-audio-btn",
                     )
 
+                # Pipeline log viewer
+                with gr.Accordion("Pipeline Logs", open=False, elem_classes="cyber-accordion"):
+                    log_viewer = gr.HTML(value="", elem_id="log-viewer")
+
+                # Generation history
+                with gr.Accordion("Generation History", open=False, elem_classes="cyber-accordion"):
+                    history_display = gr.HTML(value="", elem_id="history-display")
+
             # ═══════════════════════════════════════════════
             # RIGHT PANEL — Studio
             # ═══════════════════════════════════════════════
@@ -2007,6 +2367,14 @@ def create_gradio_ui():
                         value=["Podcast Audio", "Infographic HTML", "Infographic PNG", "PPTX Slides"],
                         label="Outputs",
                         elem_classes="output-selector",
+                    )
+
+                    # Preset selector
+                    preset_selector = gr.Dropdown(
+                        choices=list(_PRESETS.keys()),
+                        value="Custom",
+                        label="Preset",
+                        elem_classes="preset-pills",
                     )
 
                     # Settings 2x2 grid
@@ -2044,17 +2412,34 @@ def create_gradio_ui():
                         info="Lower = precise, Higher = creative",
                     )
 
-                    # Generate button
-                    generate_button = gr.Button(
-                        "Generate",
-                        variant="primary",
-                        elem_id="generate-btn",
-                    )
-                    btn_batch = gr.Button(
-                        "Batch All Sources",
-                        variant="secondary",
-                        size="sm",
-                    )
+                    # Generate + Stop buttons
+                    with gr.Row():
+                        generate_button = gr.Button(
+                            "Generate",
+                            variant="primary",
+                            elem_id="generate-btn",
+                            scale=3,
+                        )
+                        stop_button = gr.Button(
+                            "Stop",
+                            variant="stop",
+                            elem_id="stop-btn",
+                            scale=1,
+                        )
+                    with gr.Row():
+                        btn_batch = gr.Button(
+                            "Batch All Sources",
+                            variant="secondary",
+                            size="sm",
+                            scale=3,
+                        )
+                        btn_retry = gr.Button(
+                            "Retry Failed Step",
+                            elem_id="retry-btn",
+                            size="sm",
+                            visible=False,
+                            scale=1,
+                        )
                     gr.HTML('<p class="kbd-hint"><kbd>Ctrl</kbd>+<kbd>Enter</kbd> to generate</p>')
 
                     # Voice & advanced options
@@ -2121,6 +2506,7 @@ def create_gradio_ui():
             png_preview, pptx_download,
             format_type, length, style, language, outputs_to_generate,
             output_dir, host_voice, cohost_voice, temperature_slider,
+            log_viewer, history_display,
         ]
 
         # ── Wiring — Notebook bar ─────────────────────────────
@@ -2218,20 +2604,59 @@ def create_gradio_ui():
             png_preview, pptx_download,
         ]
 
-        generate_button.click(
+        gen_event = generate_button.click(
             fn=process_podcast,
             inputs=generate_inputs,
             outputs=generate_outputs,
             show_progress="hidden",
+        ).then(
+            fn=_post_generate,
+            inputs=[notebook_selector],
+            outputs=[log_viewer, history_display, btn_retry],
+            show_progress="hidden",
         )
 
         # ── Wiring — Batch all sources ───────────────────────
-        btn_batch.click(
+        batch_event = btn_batch.click(
             fn=_process_batch,
             inputs=[config_file, format_type, length, style, language,
                     additional_preference, skip_to, outputs_to_generate,
                     notebook_selector, host_voice, cohost_voice, temperature_slider],
             outputs=generate_outputs,
+            show_progress="hidden",
+        ).then(
+            fn=_post_generate,
+            inputs=[notebook_selector],
+            outputs=[log_viewer, history_display, btn_retry],
+            show_progress="hidden",
+        )
+
+        # ── Wiring — Cancel / Stop ───────────────────────────
+        stop_button.click(
+            fn=None,
+            inputs=None,
+            outputs=None,
+            cancels=[gen_event, batch_event],
+        )
+
+        # ── Wiring — Retry failed step ───────────────────────
+        btn_retry.click(
+            fn=_on_retry,
+            inputs=generate_inputs,
+            outputs=generate_outputs,
+            show_progress="hidden",
+        ).then(
+            fn=_post_generate,
+            inputs=[notebook_selector],
+            outputs=[log_viewer, history_display, btn_retry],
+            show_progress="hidden",
+        )
+
+        # ── Wiring — Preset selector ─────────────────────────
+        preset_selector.change(
+            fn=_on_preset_select,
+            inputs=[preset_selector],
+            outputs=[format_type, length, style, language, temperature_slider],
             show_progress="hidden",
         )
 
@@ -2289,6 +2714,11 @@ def create_gradio_ui():
             fn=_on_notebook_switch,
             inputs=[notebook_selector],
             outputs=switch_outputs,
+            show_progress="hidden",
+        ).then(
+            fn=_check_provider_health,
+            inputs=None,
+            outputs=[health_banner],
             show_progress="hidden",
         )
 
