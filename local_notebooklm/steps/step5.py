@@ -42,12 +42,15 @@ class InfographicError(Exception):
 # ---------------------------------------------------------------------------
 
 def load_transcript_text(input_dir: str) -> str:
-    """Load the podcast transcript produced by Step 3.
+    """Load text for infographic generation.
 
-    Prefers ``podcast_ready_data.txt``; falls back to ``.pkl``.
+    Prefers podcast transcript (Step 3 output); falls back to raw
+    extracted text (Step 1 output) so infographics can be generated
+    without running the audio pipeline.
     """
     input_path = Path(input_dir)
 
+    # Step 3 output — podcast-formatted transcript
     txt_path = input_path / "podcast_ready_data.txt"
     if txt_path.exists():
         text = txt_path.read_text(encoding="utf-8")
@@ -64,9 +67,18 @@ def load_transcript_text(input_dir: str) -> str:
             return "\n".join(f"{spk}: {line}" for spk, line in data)
         return str(data)
 
+    # Step 1 output — raw extracted text (infographic-only mode)
+    for name in ("clean_extracted_text.txt", "extracted_text.txt"):
+        step1_path = input_path / name
+        if step1_path.exists():
+            text = step1_path.read_text(encoding="utf-8")
+            if text.strip():
+                logger.info("Using Step 1 extracted text (infographic-only mode)")
+                return text
+
     raise InfographicError(
-        f"No transcript found in {input_dir}. "
-        "Expected podcast_ready_data.txt or .pkl"
+        f"No text found in {input_dir}. "
+        "Expected podcast_ready_data.txt, .pkl, or extracted_text.txt"
     )
 
 

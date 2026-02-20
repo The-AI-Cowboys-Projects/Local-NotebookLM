@@ -2233,11 +2233,12 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
         want_pptx = "PPTX Slides" in outputs_to_generate
         want_any_infographic = want_html or want_png or want_pptx
 
-        total_steps = 3
+        # Steps 2-3 (transcript generation) only needed for audio
+        total_steps = 1  # step 1 always runs
         if want_audio:
-            total_steps += 1
+            total_steps += 3  # steps 2, 3, 4
         if want_any_infographic:
-            total_steps += 1
+            total_steps += 1  # step 5
 
         selected = ", ".join(outputs_to_generate)
         print(f"Processing with output_dir: {output_dir}")
@@ -2252,7 +2253,7 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
         # ── Set up LLM / TTS clients ────────────────────────
         small_text_client = set_provider(config=config["Small-Text-Model"]["provider"])
         big_text_client = set_provider(config=config["Big-Text-Model"]["provider"])
-        tts_client = set_provider(config=config["Text-To-Speech-Model"]["provider"])
+        tts_client = set_provider(config=config["Text-To-Speech-Model"]["provider"]) if want_audio else None
 
         # ── System prompts per step ──────────────────────────
         system_prompts = {}
@@ -2304,54 +2305,55 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
                 yield _empty_result("No output files from Step 1. Cannot skip.")
                 return
 
-        # ── Step 2: Generate transcript ──────────────────────
-        step_times.append(time.time() - step_start)
-        current_step += 1
-        eta = _format_eta(step_times, current_step, total_steps)
-        yield _empty_result(_build_progress_html(current_step, total_steps, "Generating transcript...", eta))
-        step_start = time.time()
-
-        if not skip_to or skip_to <= 2:
-            _, transcript_file = step2(
-                client=big_text_client,
-                config=config,
-                input_file=cleaned_text_file,
-                output_dir=str(output_dirs["step2"]),
-                format_type=format_type,
-                length=length,
-                style=style,
-                preference_text=full_preference,
-                system_prompt=system_prompts["step2"],
-            )
-        else:
-            step2_files = list(output_dirs["step2"].glob("*.pkl"))
-            if step2_files:
-                transcript_file = str(sorted(step2_files, key=lambda x: x.stat().st_mtime, reverse=True)[0])
-            else:
-                yield _empty_result("No output files from Step 2. Cannot skip.")
-                return
-
-        # ── Step 3: Optimize for TTS ─────────────────────────
-        step_times.append(time.time() - step_start)
-        current_step += 1
-        eta = _format_eta(step_times, current_step, total_steps)
-        yield _empty_result(_build_progress_html(current_step, total_steps, "Optimizing for text-to-speech...", eta))
-        step_start = time.time()
-
-        if not skip_to or skip_to <= 3:
-            step3(
-                client=big_text_client,
-                config=config,
-                input_file=transcript_file,
-                output_dir=str(output_dirs["step3"]),
-                format_type=format_type,
-                system_prompt=system_prompts["step3"],
-                language=language,
-            )
-
-        # ── Step 4: Generate audio ───────────────────────────
+        # ── Steps 2-4: Podcast pipeline (only when audio selected) ──
         step_times.append(time.time() - step_start)
         if want_audio:
+            # ── Step 2: Generate transcript ──────────────────
+            current_step += 1
+            eta = _format_eta(step_times, current_step, total_steps)
+            yield _empty_result(_build_progress_html(current_step, total_steps, "Generating transcript...", eta))
+            step_start = time.time()
+
+            if not skip_to or skip_to <= 2:
+                _, transcript_file = step2(
+                    client=big_text_client,
+                    config=config,
+                    input_file=cleaned_text_file,
+                    output_dir=str(output_dirs["step2"]),
+                    format_type=format_type,
+                    length=length,
+                    style=style,
+                    preference_text=full_preference,
+                    system_prompt=system_prompts["step2"],
+                )
+            else:
+                step2_files = list(output_dirs["step2"].glob("*.pkl"))
+                if step2_files:
+                    transcript_file = str(sorted(step2_files, key=lambda x: x.stat().st_mtime, reverse=True)[0])
+                else:
+                    yield _empty_result("No output files from Step 2. Cannot skip.")
+                    return
+
+            # ── Step 3: Optimize for TTS ─────────────────────
+            step_times.append(time.time() - step_start)
+            current_step += 1
+            eta = _format_eta(step_times, current_step, total_steps)
+            yield _empty_result(_build_progress_html(current_step, total_steps, "Optimizing for text-to-speech...", eta))
+            step_start = time.time()
+
+            if not skip_to or skip_to <= 3:
+                step3(
+                    client=big_text_client,
+                    config=config,
+                    input_file=transcript_file,
+                    output_dir=str(output_dirs["step3"]),
+                    format_type=format_type,
+                    system_prompt=system_prompts["step3"],
+                    language=language,
+                )
+
+            # ── Step 4: Generate audio ───────────────────────
+            step_times.append(time.time() - step_start)
             current_step += 1
             eta = _format_eta(step_times, current_step, total_steps)
             yield _empty_result(_build_progress_html(current_step, total_steps, "Generating audio...", eta))
@@ -2364,10 +2366,9 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
                     input_dir=str(output_dirs["step3"]),
                     output_dir=str(output_dirs["step4"]),
                 )
+            step_times.append(time.time() - step_start)
 
         # ── Step 5: Generate infographic ─────────────────────
-        if want_audio:
-            step_times.append(time.time() - step_start)
         if want_any_infographic:
             current_step += 1
             eta = _format_eta(step_times, current_step, total_steps)
@@ -2375,11 +2376,13 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
             step_start = time.time()
 
             if not skip_to or skip_to <= 5:
+                # Use step3 output if audio ran, otherwise step1 (raw text)
+                step5_input = str(output_dirs["step3"]) if want_audio else str(output_dirs["step1"])
                 try:
                     step5(
                         client=big_text_client,
                         config=config,
-                        input_dir=str(output_dirs["step3"]),
+                        input_dir=step5_input,
                         output_dir=str(output_dirs["step5"]),
                         generate_html=want_html,
                         generate_png=want_png,
