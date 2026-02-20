@@ -7,6 +7,9 @@ import gradio as gr
 import argparse
 from local_notebooklm.steps.helpers import LengthType, FormatType, StyleType, SkipToOptions
 from local_notebooklm.notebook_manager import NotebookManager
+from local_notebooklm.pipeline_runner import (
+    PipelineJob, start_job, get_job, is_running, cancel_job, remove_job, load_stale_state,
+)
 
 _log = _logging.getLogger(__name__)
 
@@ -72,8 +75,8 @@ def _build_cyberpunk_theme():
             c600="#2a2a44", c700="#1e1e35", c800="#16162a",
             c900="#0f0f1e", c950="#000000",
         ),
-        font=[gr.themes.GoogleFont("Inter"), "system-ui", "sans-serif"],
-        font_mono=[gr.themes.GoogleFont("JetBrains Mono"), "Consolas", "monospace"],
+        font=[gr.themes.GoogleFont("IBM Plex Sans"), "system-ui", "sans-serif"],
+        font_mono=[gr.themes.GoogleFont("IBM Plex Mono"), "Consolas", "monospace"],
     ).set(
         body_background_fill="#000000",
         body_background_fill_dark="#000000",
@@ -121,8 +124,8 @@ def _build_cyberpunk_theme():
         button_secondary_text_color_dark="#e0e0f0",
         button_secondary_border_color="#2a2a55",
         button_secondary_border_color_dark="#2a2a55",
-        shadow_drop="0 2px 12px rgba(0, 240, 255, 0.08)",
-        shadow_drop_lg="0 4px 24px rgba(0, 240, 255, 0.12)",
+        shadow_drop="0 2px 6px rgba(0, 0, 0, 0.3)",
+        shadow_drop_lg="0 4px 12px rgba(0, 0, 0, 0.3)",
     )
 
 
@@ -131,371 +134,326 @@ def _build_cyberpunk_theme():
 # ---------------------------------------------------------------------------
 
 CYBERPUNK_CSS = """
-/* ── Google Font preload ─────────────────────────────────────── */
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Rajdhani:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+/* ── IBM Plex Font preload ─────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;700&display=swap');
 
-/* ── Root variables ──────────────────────────────────────────── */
+/* ── Carbon Design Tokens + Neon Palette ───────────────────────── */
 :root {
+    /* ── Neon palette (kept) ─────────────────────────────────── */
     --neon-cyan: #00f0ff;
     --neon-teal: #3bd6c6;
     --neon-magenta: #ff00aa;
     --neon-pink: #dd368a;
     --neon-purple: #b400ff;
     --neon-red: #ff3a3a;
-    --true-black: #000000;
-    --dark-bg: #000000;
-    --card-bg: #0a0a14;
-    --card-border: #1a1a3a;
-    --text-primary: #d8d8ec;
-    --text-muted: #6e6e8e;
-    --glow-cyan: 0 0 8px rgba(0,240,255,0.3), 0 0 24px rgba(0,240,255,0.1);
-    --glow-teal: 0 0 8px rgba(59,214,198,0.3), 0 0 24px rgba(59,214,198,0.1);
-    --glow-magenta: 0 0 8px rgba(255,0,170,0.3), 0 0 24px rgba(255,0,170,0.1);
-    --glow-pink: 0 0 8px rgba(221,54,138,0.3), 0 0 24px rgba(221,54,138,0.1);
-    --panel-bg: #04040c;
-    --panel-border: #141430;
-    --cut: 8px;
-    --cut-lg: 14px;
+
+    /* ── Carbon spacing scale (rem-based) ────────────────────── */
+    --cds-spacing-01: 0.125rem;
+    --cds-spacing-02: 0.25rem;
+    --cds-spacing-03: 0.5rem;
+    --cds-spacing-04: 0.75rem;
+    --cds-spacing-05: 1rem;
+    --cds-spacing-06: 1.5rem;
+    --cds-spacing-07: 2rem;
+    --cds-spacing-08: 2.5rem;
+    --cds-spacing-09: 3rem;
+    --cds-spacing-10: 4rem;
+    --cds-spacing-11: 5rem;
+    --cds-spacing-12: 6rem;
+
+    /* ── Carbon typography scale ──────────────────────────────── */
+    --cds-label-01-size: 0.75rem;
+    --cds-label-01-weight: 400;
+    --cds-label-01-line-height: 1.34;
+    --cds-label-02-size: 0.875rem;
+    --cds-label-02-weight: 400;
+    --cds-body-01-size: 0.875rem;
+    --cds-body-01-line-height: 1.43;
+    --cds-body-02-size: 1rem;
+    --cds-body-02-line-height: 1.5;
+    --cds-heading-01-size: 0.875rem;
+    --cds-heading-01-weight: 600;
+    --cds-heading-02-size: 1rem;
+    --cds-heading-02-weight: 600;
+    --cds-heading-03-size: 1.25rem;
+    --cds-heading-03-weight: 400;
+    --cds-code-01-size: 0.75rem;
+    --cds-code-01-line-height: 1.34;
+    --cds-code-02-size: 0.875rem;
+    --cds-code-02-line-height: 1.43;
+    --cds-letter-spacing-dense: 0.16px;
+
+    /* ── Carbon font stacks ──────────────────────────────────── */
+    --cds-font-sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+    --cds-font-mono: 'IBM Plex Mono', Consolas, 'Courier New', monospace;
+
+    /* ── Carbon component heights ────────────────────────────── */
+    --cds-height-sm: 2rem;
+    --cds-height-md: 2.5rem;
+    --cds-height-lg: 3rem;
+
+    /* ── Carbon motion ───────────────────────────────────────── */
+    --cds-motion-productive: cubic-bezier(0.2, 0, 0.38, 0.9);
+    --cds-motion-expressive: cubic-bezier(0.4, 0.14, 0.3, 1);
+    --cds-duration-fast-01: 70ms;
+    --cds-duration-fast-02: 110ms;
+    --cds-duration-moderate-01: 150ms;
+    --cds-duration-moderate-02: 240ms;
+    --cds-duration-slow-01: 400ms;
+    --cds-duration-slow-02: 700ms;
+
+    /* ── Carbon focus ring ───────────────────────────────────── */
+    --cds-focus: var(--neon-cyan);
+    --cds-focus-inset: #000000;
+
+    /* ── Carbon layer tokens → neon-mapped ───────────────────── */
+    --cds-background: #000000;
+    --cds-layer-01: #0a0a14;
+    --cds-layer-02: #0f0f1e;
+    --cds-layer-03: #16162a;
+    --cds-layer-hover-01: #111125;
+    --cds-layer-active-01: #1a1a3a;
+    --cds-border-subtle-00: #141430;
+    --cds-border-subtle-01: #1a1a3a;
+    --cds-border-strong-01: #2a2a55;
+    --cds-border-interactive: var(--neon-cyan);
+    --cds-text-primary: #d8d8ec;
+    --cds-text-secondary: #6e6e8e;
+    --cds-text-placeholder: #555577;
+    --cds-text-on-color: #000000;
+    --cds-link-primary: var(--neon-cyan);
+    --cds-link-primary-hover: var(--neon-teal);
+    --cds-icon-primary: #d8d8ec;
+    --cds-icon-secondary: #6e6e8e;
+    --cds-button-primary: var(--neon-cyan);
+    --cds-button-primary-hover: var(--neon-teal);
+    --cds-button-secondary: var(--cds-layer-03);
+    --cds-button-secondary-hover: var(--cds-border-strong-01);
+    --cds-button-danger: var(--neon-red);
+    --cds-support-error: var(--neon-red);
+    --cds-support-success: var(--neon-teal);
+    --cds-support-warning: #ff8844;
+    --cds-support-info: var(--neon-cyan);
+    --cds-notification-background-error: rgba(255,58,58,0.06);
+    --cds-notification-background-info: rgba(0,240,255,0.04);
+
+    /* ── Carbon shadow tokens ────────────────────────────────── */
+    --cds-shadow-sm: 0 2px 6px rgba(0,0,0,0.3);
+    --cds-shadow-md: 0 4px 12px rgba(0,0,0,0.3);
 }
 
-/* ── Clipped corner utility ─────────────────────────────────── */
-.cp-clip {
-    clip-path: polygon(
-        0 var(--cut), var(--cut) 0,
-        calc(100% - var(--cut)) 0, 100% var(--cut),
-        100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%,
-        var(--cut) 100%, 0 calc(100% - var(--cut))
-    );
-}
-
-/* ── Animated background ─────────────────────────────────────── */
+/* ── Solid background ──────────────────────────────────────────── */
 .gradio-container {
-    background:
-        radial-gradient(ellipse at 15% 10%, rgba(0,240,255,0.03) 0%, transparent 50%),
-        radial-gradient(ellipse at 85% 90%, rgba(221,54,138,0.025) 0%, transparent 50%),
-        #000000 !important;
+    background: var(--cds-background) !important;
     min-height: 100vh;
 }
 
-/* ── Scan-line + grid overlay ────────────────────────────────── */
+/* ── Scan-line overlay (horizontal only, subtle) ───────────────── */
 .gradio-container::before {
     content: "";
     position: fixed;
     inset: 0;
     background:
-        repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,240,255,0.012) 2px, rgba(0,240,255,0.012) 4px),
-        repeating-linear-gradient(90deg, transparent, transparent 80px, rgba(0,240,255,0.015) 80px, rgba(0,240,255,0.015) 81px),
-        repeating-linear-gradient(0deg, transparent, transparent 80px, rgba(0,240,255,0.015) 80px, rgba(0,240,255,0.015) 81px);
+        repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,240,255,0.008) 2px, rgba(0,240,255,0.008) 4px);
     pointer-events: none;
     z-index: 9999;
 }
 
-/* ── HUD Header bar ──────────────────────────────────────────── */
+/* ── Carbon UI Shell header (48px) ─────────────────────────────── */
 .header-bar {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0.5rem 1.5rem;
-    background: linear-gradient(180deg, rgba(0,240,255,0.04) 0%, var(--panel-bg) 100%);
-    border-bottom: 2px solid var(--neon-cyan);
-    position: relative;
-}
-.header-bar::after {
-    content: "";
-    position: absolute;
-    bottom: -2px;
-    left: 0;
-    right: 0;
-    height: 1px;
-    background: linear-gradient(90deg, var(--neon-cyan), transparent 30%, transparent 70%, var(--neon-pink));
-    filter: blur(4px);
+    padding: 0 var(--cds-spacing-05);
+    height: var(--cds-height-lg);
+    background: var(--cds-layer-01);
+    border-bottom: 1px solid var(--cds-border-subtle-00);
 }
 .header-bar .hud-label {
-    font-family: 'Rajdhani', 'JetBrains Mono', monospace;
-    font-size: 0.6rem;
-    font-weight: 500;
-    color: var(--text-muted);
-    letter-spacing: 0.25em;
+    font-family: var(--cds-font-mono);
+    font-size: var(--cds-label-01-size);
+    font-weight: 400;
+    color: var(--cds-text-secondary);
+    letter-spacing: var(--cds-letter-spacing-dense);
     text-transform: uppercase;
 }
 .header-bar .title {
-    font-family: 'Rajdhani', sans-serif;
-    font-size: 1.3rem;
-    font-weight: 700;
+    font-family: var(--cds-font-sans);
+    font-size: var(--cds-heading-03-size);
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.08em;
     color: var(--neon-cyan);
-    text-shadow: 0 0 12px rgba(0,240,255,0.3);
 }
 .header-bar .title .accent {
     color: var(--neon-pink);
 }
+
+/* ── Pipeline chips → Carbon tags (pill shape) ─────────────────── */
 .header-bar .pipeline-chips {
     display: flex;
-    gap: 0;
+    gap: var(--cds-spacing-02);
     align-items: center;
 }
 .header-bar .pipeline-chips .chip {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.6rem;
+    font-family: var(--cds-font-mono);
+    font-size: var(--cds-label-01-size);
     font-weight: 500;
     color: var(--neon-cyan);
-    padding: 0.25rem 0.6rem;
+    padding: var(--cds-spacing-01) var(--cds-spacing-03);
     border: 1px solid rgba(0,240,255,0.2);
-    border-right: none;
     background: rgba(0,240,255,0.03);
-    letter-spacing: 0.08em;
+    letter-spacing: var(--cds-letter-spacing-dense);
     text-transform: uppercase;
-    transition: all 0.3s;
+    border-radius: 100px;
+    transition: background var(--cds-duration-fast-02) var(--cds-motion-productive);
 }
-.header-bar .pipeline-chips .chip:first-child {
-    clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 50%, calc(100% - 6px) 100%, 0 100%);
-    padding-right: 1rem;
-}
-.header-bar .pipeline-chips .chip:last-child {
-    clip-path: polygon(6px 0, 100% 0, 100% 100%, 6px 100%, 0 50%);
-    padding-left: 1rem;
-    border-right: 1px solid rgba(0,240,255,0.2);
-}
-.header-bar .pipeline-chips .chip:not(:first-child):not(:last-child) {
-    clip-path: polygon(6px 0, calc(100% - 6px) 0, 100% 50%, calc(100% - 6px) 100%, 6px 100%, 0 50%);
-    padding-left: 1rem;
-    padding-right: 1rem;
+.header-bar .pipeline-chips .chip:hover {
+    background: rgba(0,240,255,0.06);
 }
 .header-bar .page-id {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.65rem;
-    color: var(--text-muted);
-    letter-spacing: 0.1em;
+    font-family: var(--cds-font-mono);
+    font-size: var(--cds-label-01-size);
+    color: var(--cds-text-secondary);
+    letter-spacing: 0.08em;
 }
 
 /* ── 3-Panel layout ──────────────────────────────────────────── */
 .panel {
-    background: var(--panel-bg) !important;
+    background: var(--cds-background) !important;
     border: none !important;
     min-height: calc(100vh - 100px);
     padding: 0 !important;
-    position: relative;
 }
 .panel-left {
-    border-right: 1px solid var(--panel-border) !important;
-}
-.panel-left::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    right: -1px;
-    width: 1px;
-    height: 40px;
-    background: var(--neon-cyan);
-    box-shadow: 0 0 6px var(--neon-cyan);
+    border-right: 1px solid var(--cds-border-subtle-00) !important;
 }
 .panel-right {
-    border-left: 1px solid var(--panel-border) !important;
-}
-.panel-right::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    left: -1px;
-    width: 1px;
-    height: 40px;
-    background: var(--neon-pink);
-    box-shadow: 0 0 6px var(--neon-pink);
+    border-left: 1px solid var(--cds-border-subtle-00) !important;
 }
 .panel-header {
-    font-family: 'Rajdhani', sans-serif;
-    font-size: 0.72rem;
+    font-family: var(--cds-font-sans);
+    font-size: var(--cds-heading-01-size);
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.22em;
+    letter-spacing: var(--cds-letter-spacing-dense);
     color: var(--neon-cyan);
-    padding: 0.9rem 1rem 0.6rem;
-    border-bottom: 1px solid rgba(0,240,255,0.15);
-    margin-bottom: 0.5rem;
-    position: relative;
-}
-.panel-header::before {
-    content: "//";
-    margin-right: 0.5rem;
-    color: var(--neon-pink);
-    opacity: 0.6;
+    padding: var(--cds-spacing-04) var(--cds-spacing-05) var(--cds-spacing-03);
+    border-bottom: 1px solid var(--cds-border-subtle-00);
+    margin-bottom: var(--cds-spacing-03);
 }
 .panel-content {
-    padding: 0.5rem 0.8rem 1rem;
+    padding: var(--cds-spacing-03) var(--cds-spacing-04) var(--cds-spacing-05);
 }
 .panel-empty {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.75rem;
-    color: var(--text-muted);
+    font-family: var(--cds-font-mono);
+    font-size: var(--cds-body-01-size);
+    color: var(--cds-text-secondary);
     text-align: center;
-    padding: 2rem 1rem;
+    padding: var(--cds-spacing-07) var(--cds-spacing-05);
     line-height: 1.6;
-    letter-spacing: 0.04em;
 }
 
-/* ── HUD Frame — decorative corner brackets on center panel ──── */
-.panel:not(.panel-left):not(.panel-right) {
-    position: relative;
-}
-.panel:not(.panel-left):not(.panel-right)::before,
-.panel:not(.panel-left):not(.panel-right)::after {
-    content: "";
-    position: absolute;
-    width: 20px;
-    height: 20px;
-    border-color: var(--neon-cyan);
-    border-style: solid;
-    opacity: 0.4;
-    z-index: 1;
-    pointer-events: none;
-}
-.panel:not(.panel-left):not(.panel-right)::before {
-    top: 4px;
-    left: 4px;
-    border-width: 2px 0 0 2px;
-}
-.panel:not(.panel-left):not(.panel-right)::after {
-    bottom: 4px;
-    right: 4px;
-    border-width: 0 2px 2px 0;
-}
-
-/* ── Section cards — angular ─────────────────────────────────── */
+/* ── Section cards — Carbon tile ──────────────────────────────── */
 .cyber-card {
-    background: var(--card-bg) !important;
-    border: 1px solid var(--card-border) !important;
+    background: var(--cds-layer-01) !important;
+    border: 1px solid var(--cds-border-subtle-01) !important;
     border-radius: 0 !important;
-    padding: 1.2rem !important;
-    position: relative;
-    clip-path: polygon(
-        0 var(--cut), var(--cut) 0,
-        100% 0, 100% calc(100% - var(--cut)),
-        calc(100% - var(--cut)) 100%, 0 100%
-    );
-    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+    padding: var(--cds-spacing-05) !important;
+    transition: border-color var(--cds-duration-fast-02) var(--cds-motion-productive);
 }
 .cyber-card:hover {
-    border-color: rgba(59,214,198,0.3) !important;
-    box-shadow: var(--glow-teal);
+    border-color: var(--neon-teal) !important;
 }
 .cyber-card-label {
-    font-family: 'Rajdhani', sans-serif !important;
-    font-size: 0.72rem !important;
+    font-family: var(--cds-font-sans) !important;
+    font-size: var(--cds-heading-01-size) !important;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.22em;
+    letter-spacing: var(--cds-letter-spacing-dense);
     color: var(--neon-cyan) !important;
-    margin-bottom: 0.8rem !important;
-    padding-bottom: 0.4rem;
-    border-bottom: 1px solid rgba(0,240,255,0.15);
-}
-.cyber-card-label::before {
-    content: "// ";
-    color: var(--neon-pink);
-    opacity: 0.6;
+    margin-bottom: var(--cds-spacing-04) !important;
+    padding-bottom: var(--cds-spacing-02);
+    border-bottom: 1px solid var(--cds-border-subtle-00);
 }
 
-/* ── Generate button — angular HUD style ─────────────────────── */
+/* ── Generate button — Carbon primary contained ─────────────────── */
 #generate-btn {
-    margin-top: 0.5rem;
+    margin-top: var(--cds-spacing-03);
 }
 #generate-btn button {
-    font-family: 'Rajdhani', sans-serif !important;
-    font-size: 1rem !important;
-    font-weight: 700 !important;
-    letter-spacing: 0.2em !important;
+    font-family: var(--cds-font-sans) !important;
+    font-size: var(--cds-body-01-size) !important;
+    font-weight: 600 !important;
+    letter-spacing: var(--cds-letter-spacing-dense) !important;
     text-transform: uppercase !important;
-    padding: 0.9rem 1.5rem !important;
+    padding: 0 var(--cds-spacing-05) !important;
+    height: var(--cds-height-lg) !important;
     border-radius: 0 !important;
-    position: relative;
-    overflow: hidden;
-    transition: all 0.3s ease !important;
-    background: var(--neon-cyan) !important;
-    color: #000 !important;
-    clip-path: polygon(
-        0 0, calc(100% - 12px) 0, 100% 12px,
-        100% 100%, 12px 100%, 0 calc(100% - 12px)
-    );
+    background: var(--cds-button-primary) !important;
+    color: var(--cds-text-on-color) !important;
+    border: none !important;
+    transition: background var(--cds-duration-fast-02) var(--cds-motion-productive) !important;
 }
 #generate-btn button:hover {
-    background: var(--neon-teal) !important;
-    box-shadow: 0 0 20px rgba(0,240,255,0.4), 0 0 40px rgba(0,240,255,0.15) !important;
+    background: var(--cds-button-primary-hover) !important;
 }
-#generate-btn button::after {
-    content: "";
-    position: absolute;
-    top: 0;
-    left: -100%;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent);
-    animation: btnSweep 3s ease-in-out infinite;
-}
-@keyframes btnSweep {
-    0% { left: -100%; }
-    50% { left: 100%; }
-    100% { left: 100%; }
+#generate-btn button:focus {
+    outline: 2px solid var(--cds-focus) !important;
+    outline-offset: -2px;
 }
 
-/* ── Progress bar ───────────────────────────────────────────── */
+/* ── Progress bar — Carbon progress indicator ──────────────────── */
 .progress-hud {
-    border: 1px solid var(--card-border);
-    background: var(--card-bg);
-    padding: 0.8rem 1rem;
-    position: relative;
-    clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut)));
+    border: 1px solid var(--cds-border-subtle-01);
+    background: var(--cds-layer-01);
+    padding: var(--cds-spacing-04) var(--cds-spacing-05);
 }
 .progress-steps {
     display: flex;
     gap: 0;
-    margin-bottom: 0.6rem;
+    margin-bottom: var(--cds-spacing-03);
 }
 .progress-step {
     flex: 1;
     height: 4px;
-    background: var(--panel-border);
-    position: relative;
-    transition: background 0.5s ease;
+    background: var(--cds-border-subtle-00);
+    transition: background var(--cds-duration-moderate-02) var(--cds-motion-productive);
 }
 .progress-step.done {
     background: var(--neon-cyan);
-    box-shadow: 0 0 6px rgba(0,240,255,0.4);
 }
 .progress-step.active {
     background: linear-gradient(90deg, var(--neon-cyan), var(--neon-teal));
     animation: progressPulse 1.5s ease-in-out infinite;
 }
 @keyframes progressPulse {
-    0%, 100% { opacity: 1; box-shadow: 0 0 6px rgba(0,240,255,0.3); }
-    50% { opacity: 0.7; box-shadow: 0 0 12px rgba(0,240,255,0.6); }
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
 }
 .progress-step + .progress-step { margin-left: 3px; }
 .progress-text {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.78rem;
-    color: var(--text-primary);
-    letter-spacing: 0.04em;
+    font-family: var(--cds-font-mono);
+    font-size: var(--cds-body-01-size);
+    color: var(--cds-text-primary);
 }
 .progress-eta {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.68rem;
+    font-family: var(--cds-font-mono);
+    font-size: var(--cds-code-01-size);
     color: var(--neon-teal);
     float: right;
 }
 .progress-complete {
     color: var(--neon-cyan);
-    text-shadow: 0 0 8px rgba(0,240,255,0.3);
 }
 
-/* ── Waveform container ────────────────────────────────────── */
+/* ── Waveform container ──────────────────────────────────────── */
 .waveform-wrap {
-    border: 1px solid var(--card-border);
-    background: var(--card-bg);
-    padding: 0.4rem;
-    margin-top: 0.4rem;
+    border: 1px solid var(--cds-border-subtle-01);
+    background: var(--cds-layer-01);
+    padding: var(--cds-spacing-02);
+    margin-top: var(--cds-spacing-02);
     min-height: 48px;
-    position: relative;
     overflow: hidden;
 }
 .waveform-bars {
@@ -519,198 +477,168 @@ CYBERPUNK_CSS = """
 
 /* ── Regen button ──────────────────────────────────────────── */
 #regen-audio-btn button {
-    font-family: 'JetBrains Mono', monospace !important;
-    font-size: 0.72rem !important;
-    letter-spacing: 0.08em !important;
+    font-family: var(--cds-font-mono) !important;
+    font-size: var(--cds-code-02-size) !important;
+    letter-spacing: var(--cds-letter-spacing-dense) !important;
     text-transform: uppercase !important;
     border: 1px solid rgba(0,240,255,0.25) !important;
     background: rgba(0,240,255,0.04) !important;
     color: var(--neon-cyan) !important;
+    height: var(--cds-height-md);
+    transition: border-color var(--cds-duration-fast-02) var(--cds-motion-productive);
 }
 #regen-audio-btn button:hover {
     border-color: var(--neon-cyan) !important;
-    box-shadow: var(--glow-cyan);
 }
 
 /* ── Keyboard hint ─────────────────────────────────────────── */
 .kbd-hint {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.6rem;
-    color: var(--text-muted);
+    font-family: var(--cds-font-mono);
+    font-size: var(--cds-label-01-size);
+    color: var(--cds-text-secondary);
     text-align: center;
-    padding: 0.3rem 0;
-    letter-spacing: 0.06em;
+    padding: var(--cds-spacing-02) 0;
     opacity: 0.6;
 }
 .kbd-hint kbd {
-    background: var(--card-bg);
-    border: 1px solid var(--card-border);
+    background: var(--cds-layer-01);
+    border: 1px solid var(--cds-border-subtle-01);
     padding: 0.1rem 0.35rem;
-    font-size: 0.58rem;
+    font-size: var(--cds-code-01-size);
     color: var(--neon-teal);
 }
 
-/* ── Status output (legacy compat) ─────────────────────────── */
+/* ── Status output ─────────────────────────────────────────── */
 #status-box textarea {
-    font-family: 'JetBrains Mono', monospace !important;
-    font-size: 0.82rem !important;
-    border: 1px solid var(--card-border) !important;
+    font-family: var(--cds-font-mono) !important;
+    font-size: var(--cds-body-01-size) !important;
+    border: 1px solid var(--cds-border-subtle-01) !important;
     border-left: 3px solid var(--neon-cyan) !important;
     border-radius: 0 !important;
-    background: var(--card-bg) !important;
-    transition: border-color 0.3s, box-shadow 0.3s;
+    background: var(--cds-layer-01) !important;
+    transition: border-color var(--cds-duration-fast-02) var(--cds-motion-productive);
 }
 
-/* ── Audio player — angular ──────────────────────────────────── */
+/* ── Audio player ──────────────────────────────────────────── */
 #audio-player {
-    border: 1px solid var(--card-border) !important;
+    border: 1px solid var(--cds-border-subtle-01) !important;
     border-radius: 0 !important;
-    background: var(--card-bg) !important;
+    background: var(--cds-layer-01) !important;
     overflow: hidden;
-    clip-path: polygon(
-        0 0, calc(100% - var(--cut)) 0, 100% var(--cut),
-        100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut))
-    );
 }
 #audio-player audio {
     filter: hue-rotate(160deg) saturate(1.5);
 }
 
-/* ── Accordion — angular neon ────────────────────────────────── */
+/* ── Accordion — Carbon accordion (bottom-border dividers) ────── */
 .cyber-accordion .label-wrap {
-    font-family: 'JetBrains Mono', monospace !important;
-    font-size: 0.78rem !important;
-    letter-spacing: 0.08em;
-    border-bottom: 1px solid transparent !important;
-    border-left: 2px solid transparent !important;
-    padding-left: 0.6rem !important;
-    transition: all 0.3s ease;
-    color: var(--text-muted) !important;
+    font-family: var(--cds-font-mono) !important;
+    font-size: var(--cds-body-01-size) !important;
+    border-bottom: 1px solid var(--cds-border-subtle-00) !important;
+    border-left: none !important;
+    padding: var(--cds-spacing-03) 0 !important;
+    transition: color var(--cds-duration-fast-02) var(--cds-motion-productive);
+    color: var(--cds-text-secondary) !important;
 }
 .cyber-accordion .label-wrap:hover {
-    color: var(--neon-cyan) !important;
-    border-left-color: var(--neon-cyan) !important;
+    color: var(--cds-text-primary) !important;
 }
 .cyber-accordion .label-wrap .icon {
     color: var(--neon-teal) !important;
 }
 
-/* ── File upload — dashed angular ────────────────────────────── */
+/* ── File upload — Carbon file uploader ────────────────────────── */
 .cyber-upload .upload-container,
 .cyber-upload [data-testid="droparea"] {
-    border: 1px dashed rgba(0,240,255,0.25) !important;
+    border: 1px dashed var(--cds-border-strong-01) !important;
     border-radius: 0 !important;
-    background: rgba(0,240,255,0.015) !important;
-    transition: all 0.3s ease;
+    background: transparent !important;
+    transition: border-color var(--cds-duration-fast-02) var(--cds-motion-productive);
 }
 .cyber-upload .upload-container:hover,
 .cyber-upload [data-testid="droparea"]:hover {
-    border-color: rgba(59,214,198,0.5) !important;
-    background: rgba(59,214,198,0.03) !important;
-    box-shadow: var(--glow-teal);
+    border-color: var(--neon-teal) !important;
+    background: rgba(59,214,198,0.02) !important;
 }
 
 /* ── Dropdown / select ───────────────────────────────────────── */
 .gradio-container select,
 .gradio-container .wrap.svelte-1s0gk1z,
 .gradio-container .secondary-wrap {
-    background: var(--card-bg) !important;
-    border-color: var(--card-border) !important;
+    background: var(--cds-layer-01) !important;
+    border-color: var(--cds-border-subtle-01) !important;
     border-radius: 0 !important;
-    color: var(--text-primary) !important;
+    color: var(--cds-text-primary) !important;
 }
 
-/* ── Output selector — angular card grid ─────────────────────── */
+/* ── Output selector — Carbon selectable tile grid ────────────── */
 .output-selector label {
-    font-family: 'JetBrains Mono', monospace !important;
-    font-size: 0.74rem !important;
-    letter-spacing: 0.06em;
+    font-family: var(--cds-font-mono) !important;
+    font-size: var(--cds-code-02-size) !important;
 }
 .output-selector .wrap {
     display: grid !important;
     grid-template-columns: 1fr 1fr !important;
-    gap: 0.5rem !important;
+    gap: var(--cds-spacing-03) !important;
 }
 .output-selector .wrap > label {
     display: flex !important;
     align-items: center;
-    gap: 0.4rem;
-    padding: 0.55rem 0.65rem !important;
-    border: 1px solid var(--card-border) !important;
+    gap: var(--cds-spacing-02);
+    padding: var(--cds-spacing-03) var(--cds-spacing-04) !important;
+    border: 1px solid var(--cds-border-subtle-01) !important;
     border-radius: 0 !important;
-    background: var(--card-bg) !important;
+    background: var(--cds-layer-01) !important;
     cursor: pointer;
-    transition: all 0.25s ease;
-    clip-path: polygon(
-        0 0, calc(100% - 6px) 0, 100% 6px,
-        100% 100%, 6px 100%, 0 calc(100% - 6px)
-    );
+    transition: border-color var(--cds-duration-fast-02) var(--cds-motion-productive);
 }
 .output-selector .wrap > label:hover {
     border-color: var(--neon-teal) !important;
-    box-shadow: var(--glow-teal);
 }
 .output-selector .wrap > label:has(input:checked) {
     border-color: var(--neon-cyan) !important;
-    background: rgba(0,240,255,0.07) !important;
-    box-shadow: inset 0 0 12px rgba(0,240,255,0.06);
+    background: rgba(0,240,255,0.04) !important;
 }
 .output-selector input[type="checkbox"] {
     accent-color: var(--neon-cyan) !important;
 }
 
-/* ── Scrollbar — thin neon ───────────────────────────────────── */
+/* ── Scrollbar — solid thumb ───────────────────────────────────── */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-track { background: var(--dark-bg); }
+::-webkit-scrollbar-track { background: var(--cds-background); }
 ::-webkit-scrollbar-thumb {
-    background: linear-gradient(180deg, var(--neon-cyan), var(--neon-pink));
+    background: var(--neon-cyan);
     border-radius: 0;
 }
 
-/* ── Footer — HUD line ───────────────────────────────────────── */
+/* ── Footer — clean divider ───────────────────────────────────── */
 .cyber-footer {
     text-align: center;
-    padding: 0.8rem 1rem 1.2rem;
+    padding: var(--cds-spacing-04) var(--cds-spacing-05) var(--cds-spacing-05);
     margin-top: 0;
-    position: relative;
 }
 .cyber-footer .divider {
-    height: 2px;
-    background: var(--neon-pink);
-    margin-bottom: 0.8rem;
-    position: relative;
+    height: 1px;
+    background: var(--cds-border-subtle-00);
+    margin-bottom: var(--cds-spacing-04);
 }
-.cyber-footer .divider::before,
-.cyber-footer .divider::after {
-    content: "";
-    position: absolute;
-    top: -3px;
-    width: 8px;
-    height: 8px;
-    border: 2px solid var(--neon-pink);
-    background: var(--panel-bg);
-    transform: rotate(45deg);
-}
-.cyber-footer .divider::before { left: 20px; }
-.cyber-footer .divider::after { right: 20px; }
 .cyber-footer p {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.65rem;
-    color: var(--text-muted);
-    letter-spacing: 0.12em;
+    font-family: var(--cds-font-mono);
+    font-size: var(--cds-label-01-size);
+    color: var(--cds-text-secondary);
+    letter-spacing: 0.08em;
     text-transform: uppercase;
 }
 .cyber-footer a {
     color: var(--neon-cyan) !important;
     text-decoration: none !important;
-    transition: color 0.3s, text-shadow 0.3s;
+    transition: color var(--cds-duration-fast-02) var(--cds-motion-productive);
 }
 .cyber-footer a:hover {
     color: var(--neon-pink) !important;
-    text-shadow: 0 0 8px rgba(221,54,138,0.4);
 }
 
-/* ── Input fields — angular ──────────────────────────────────── */
+/* ── Input fields ──────────────────────────────────────────── */
 .gradio-container textarea,
 .gradio-container input[type="text"] {
     caret-color: var(--neon-cyan) !important;
@@ -719,7 +647,8 @@ CYBERPUNK_CSS = """
 .gradio-container textarea:focus,
 .gradio-container input[type="text"]:focus {
     border-color: var(--neon-cyan) !important;
-    box-shadow: 0 0 8px rgba(0,240,255,0.15) !important;
+    outline: 2px solid var(--cds-focus) !important;
+    outline-offset: -2px;
 }
 
 /* ── Global overrides — kill all border-radius ───────────────── */
@@ -734,25 +663,32 @@ CYBERPUNK_CSS = """
     border-radius: 0 !important;
 }
 
+/* ── Global focus override — Carbon focus ring ───────────────── */
+.gradio-container *:focus-visible {
+    outline: 2px solid var(--cds-focus) !important;
+    outline-offset: -2px;
+    box-shadow: none !important;
+}
+
 /* ── Group wrapper ───────────────────────────────────────────── */
 .gradio-group {
     background: transparent !important;
     border: none !important;
 }
 
-/* ── Results fade-in ─────────────────────────────────────────── */
+/* ── Results fade-in — Carbon expressive motion ──────────────── */
 @keyframes fadeInUp {
-    from { opacity: 0; transform: translateY(12px); }
+    from { opacity: 0; transform: translateY(8px); }
     to { opacity: 1; transform: translateY(0); }
 }
 .results-section {
-    animation: fadeInUp 0.5s ease-out;
+    animation: fadeInUp var(--cds-duration-slow-01) var(--cds-motion-expressive);
 }
 
 /* ── Downloads row ───────────────────────────────────────────── */
 .download-row {
     display: flex;
-    gap: 0.75rem;
+    gap: var(--cds-spacing-04);
     flex-wrap: wrap;
 }
 .download-row > div {
@@ -766,65 +702,63 @@ CYBERPUNK_CSS = """
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 4rem 2rem;
-    color: var(--text-muted);
+    padding: var(--cds-spacing-10) var(--cds-spacing-07);
+    color: var(--cds-text-secondary);
     text-align: center;
 }
 .center-empty .icon {
     font-size: 2.5rem;
-    margin-bottom: 1rem;
+    margin-bottom: var(--cds-spacing-05);
     opacity: 0.3;
 }
 .center-empty p {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.82rem;
+    font-family: var(--cds-font-mono);
+    font-size: var(--cds-body-01-size);
     line-height: 1.6;
 }
 
-/* ── Notebook bar — angular ──────────────────────────────────── */
+/* ── Notebook bar ──────────────────────────────────────────── */
 .notebook-bar {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.45rem 1rem;
-    border-bottom: 1px solid var(--panel-border);
-    background: var(--panel-bg);
+    gap: var(--cds-spacing-03);
+    padding: var(--cds-spacing-02) var(--cds-spacing-05);
+    border-bottom: 1px solid var(--cds-border-subtle-00);
+    background: var(--cds-background);
 }
 .notebook-bar .nb-btn button {
-    font-family: 'JetBrains Mono', monospace !important;
-    font-size: 0.68rem !important;
-    padding: 0.3rem 0.65rem !important;
-    letter-spacing: 0.08em !important;
+    font-family: var(--cds-font-mono) !important;
+    font-size: var(--cds-code-01-size) !important;
+    padding: var(--cds-spacing-02) var(--cds-spacing-04) !important;
     text-transform: uppercase !important;
     border-radius: 0 !important;
-    clip-path: polygon(0 0, calc(100% - 5px) 0, 100% 5px, 100% 100%, 5px 100%, 0 calc(100% - 5px));
+    height: var(--cds-height-sm);
 }
 
-/* ── Source list in left panel ───────────────────────────────── */
+/* ── Source list ───────────────────────────────────────────── */
 .source-list {
     display: flex;
     flex-direction: column;
-    gap: 0.35rem;
-    padding: 0.4rem 0;
+    gap: var(--cds-spacing-02);
+    padding: var(--cds-spacing-02) 0;
 }
 .source-item {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.45rem 0.65rem;
-    background: var(--card-bg);
-    border: 1px solid var(--card-border);
+    gap: var(--cds-spacing-03);
+    padding: var(--cds-spacing-03) var(--cds-spacing-04);
+    background: var(--cds-layer-01);
+    border: 1px solid var(--cds-border-subtle-01);
     border-left: 2px solid var(--neon-teal);
     border-radius: 0;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.72rem;
-    color: var(--text-primary);
-    transition: border-color 0.25s, box-shadow 0.25s;
+    font-family: var(--cds-font-mono);
+    font-size: var(--cds-code-02-size);
+    color: var(--cds-text-primary);
+    transition: border-color var(--cds-duration-fast-02) var(--cds-motion-productive);
 }
 .source-item:hover {
-    border-color: rgba(59,214,198,0.4);
+    border-color: var(--neon-teal);
     border-left-color: var(--neon-cyan);
-    box-shadow: var(--glow-teal);
 }
 .source-icon {
     flex-shrink: 0;
@@ -841,32 +775,32 @@ CYBERPUNK_CSS = """
     white-space: nowrap;
 }
 .source-empty {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.72rem;
-    color: var(--text-muted);
+    font-family: var(--cds-font-mono);
+    font-size: var(--cds-code-02-size);
+    color: var(--cds-text-secondary);
     text-align: center;
-    padding: 1rem 0.5rem;
-    letter-spacing: 0.04em;
+    padding: var(--cds-spacing-05) var(--cds-spacing-03);
 }
 
-/* ── All Gradio labels — monospace ───────────────────────────── */
+/* ── All Gradio labels ───────────────────────────────────────── */
 .gradio-container label span {
-    font-family: 'JetBrains Mono', monospace !important;
-    font-size: 0.75rem !important;
-    letter-spacing: 0.04em;
+    font-family: var(--cds-font-mono) !important;
+    font-size: var(--cds-label-01-size) !important;
+    letter-spacing: var(--cds-letter-spacing-dense);
     text-transform: uppercase;
-    color: var(--text-muted) !important;
+    color: var(--cds-text-secondary) !important;
 }
 
-/* ── Secondary / stop buttons ────────────────────────────────── */
+/* ── Secondary / stop buttons — Carbon ghost/danger ──────────── */
 .gradio-container button.secondary {
     border-radius: 0 !important;
-    border: 1px solid var(--card-border) !important;
-    background: var(--card-bg) !important;
-    color: var(--text-primary) !important;
-    font-family: 'JetBrains Mono', monospace !important;
-    letter-spacing: 0.06em;
-    transition: all 0.25s;
+    border: 1px solid var(--cds-border-subtle-01) !important;
+    background: var(--cds-layer-01) !important;
+    color: var(--cds-text-primary) !important;
+    font-family: var(--cds-font-mono) !important;
+    height: var(--cds-height-md);
+    transition: border-color var(--cds-duration-fast-02) var(--cds-motion-productive),
+                color var(--cds-duration-fast-02) var(--cds-motion-productive);
 }
 .gradio-container button.secondary:hover {
     border-color: var(--neon-teal) !important;
@@ -879,27 +813,25 @@ CYBERPUNK_CSS = """
 }
 .gradio-container button.stop:hover {
     border-color: var(--neon-red) !important;
-    box-shadow: 0 0 8px rgba(255,58,58,0.2);
 }
 
-/* ── Health banner ─────────────────────────────────── */
+/* ── Health banner — Carbon inline notification ────────────────── */
 .health-banner {
-    background: rgba(255,58,58,0.06);
+    background: var(--cds-notification-background-error);
     border: 1px solid rgba(255,58,58,0.25);
-    padding: 8px 16px;
-    font-family: var(--font-mono);
-    font-size: 12px;
+    border-left: 3px solid var(--neon-red);
+    padding: var(--cds-spacing-03) var(--cds-spacing-05);
+    font-family: var(--cds-font-mono);
+    font-size: var(--cds-label-01-size);
     color: #ff8888;
-    clip-path: polygon(0 0,100% 0,99.5% 100%,0.5% 100%);
 }
 
 /* ── Preset pills ──────────────────────────────────── */
-#preset-selector .wrap { gap: 4px !important; }
+#preset-selector .wrap { gap: var(--cds-spacing-02) !important; }
 #preset-selector label {
-    font-size: 11px !important;
-    padding: 3px 10px !important;
+    font-size: var(--cds-code-01-size) !important;
+    padding: var(--cds-spacing-01) var(--cds-spacing-03) !important;
     border-radius: 0 !important;
-    clip-path: polygon(4px 0,100% 0,calc(100% - 4px) 100%,0 100%);
 }
 
 /* ── Stop button ───────────────────────────────────── */
@@ -907,6 +839,7 @@ CYBERPUNK_CSS = """
     background: rgba(255,58,58,0.08) !important;
     border: 1px solid rgba(255,58,58,0.3) !important;
     color: #ff6666 !important;
+    height: var(--cds-height-lg);
 }
 #stop-btn button:hover {
     background: rgba(255,58,58,0.15) !important;
@@ -926,69 +859,74 @@ CYBERPUNK_CSS = """
 
 /* ── Log viewer ────────────────────────────────────── */
 .log-viewer {
-    margin-top: 8px;
-    font-family: var(--font-mono);
-    font-size: 11px;
+    margin-top: var(--cds-spacing-03);
+    font-family: var(--cds-font-mono);
+    font-size: var(--cds-code-01-size);
 }
 .log-viewer summary {
     cursor: pointer;
-    color: var(--text-muted);
-    padding: 4px 0;
+    color: var(--cds-text-secondary);
+    padding: var(--cds-spacing-02) 0;
 }
 .log-viewer pre {
     max-height: 200px;
     overflow-y: auto;
     background: rgba(0,0,0,0.4);
-    padding: 8px;
-    border: 1px solid #1e1e40;
-    color: #8888aa;
+    padding: var(--cds-spacing-03);
+    border: 1px solid var(--cds-border-subtle-00);
+    color: var(--cds-text-secondary);
     white-space: pre-wrap;
     word-break: break-all;
 }
 
 /* ── History timeline ──────────────────────────────── */
-.history-timeline { display: flex; flex-direction: column; gap: 6px; }
-.history-empty { color: var(--text-muted); font-size: 12px; padding: 8px 0; }
+.history-timeline { display: flex; flex-direction: column; gap: var(--cds-spacing-02); }
+.history-empty { color: var(--cds-text-secondary); font-size: var(--cds-label-01-size); padding: var(--cds-spacing-03) 0; }
 .hist-entry {
-    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-    padding: 6px 10px;
+    display: flex; align-items: center; gap: var(--cds-spacing-03); flex-wrap: wrap;
+    padding: var(--cds-spacing-03) var(--cds-spacing-04);
     border-left: 2px solid var(--neon-teal);
     background: rgba(0,240,255,0.02);
-    font-family: var(--font-mono);
-    font-size: 11px;
+    font-family: var(--cds-font-mono);
+    font-size: var(--cds-code-01-size);
 }
 .hist-entry.fail { border-left-color: var(--neon-red); background: rgba(255,58,58,0.02); }
-.hist-ts { color: var(--text-muted); min-width: 120px; }
+.hist-ts { color: var(--cds-text-secondary); min-width: 120px; }
 .hist-badge {
     background: rgba(0,240,255,0.08);
     padding: 1px 6px;
     color: var(--neon-cyan);
 }
-.hist-dur { color: var(--text-muted); }
+.hist-dur { color: var(--cds-text-secondary); }
 .hist-out { color: var(--neon-teal); }
-.hist-err { color: #ff6666; font-size: 10px; width: 100%; }
+.hist-err { color: #ff6666; font-size: var(--cds-label-01-size); width: 100%; }
 
-/* ── Notebook tabs (Radio styled as tabs) ──────────── */
+/* ── Notebook tabs — Carbon underline tabs ──────────── */
 #notebook-tabs .wrap {
     gap: 0 !important;
     flex-wrap: nowrap !important;
     overflow-x: auto;
+    border-bottom: 1px solid var(--cds-border-subtle-00);
 }
 #notebook-tabs label {
     border-radius: 0 !important;
-    border: 1px solid #1e1e40 !important;
+    border: none !important;
     border-bottom: 2px solid transparent !important;
-    padding: 6px 14px !important;
-    font-family: var(--font-mono) !important;
-    font-size: 11px !important;
-    color: var(--text-muted) !important;
+    padding: var(--cds-spacing-03) var(--cds-spacing-05) !important;
+    font-family: var(--cds-font-mono) !important;
+    font-size: var(--cds-code-01-size) !important;
+    color: var(--cds-text-secondary) !important;
     background: transparent !important;
     white-space: nowrap;
+    transition: color var(--cds-duration-fast-02) var(--cds-motion-productive),
+                border-color var(--cds-duration-fast-02) var(--cds-motion-productive);
+}
+#notebook-tabs label:hover {
+    color: var(--cds-text-primary) !important;
 }
 #notebook-tabs label.selected, #notebook-tabs input:checked + label {
     border-bottom-color: var(--neon-cyan) !important;
     color: var(--neon-cyan) !important;
-    background: rgba(0,240,255,0.04) !important;
 }
 """
 
@@ -1031,7 +969,8 @@ _notebook_mgr = NotebookManager()
 
 
 # ---------------------------------------------------------------------------
-# Generation state (shared across callbacks)
+# Generation state — now per-job via pipeline_runner; these are kept only
+# as fallbacks for the _post_generate / _on_retry callbacks when no job exists.
 # ---------------------------------------------------------------------------
 
 _last_failed_step: int | None = None
@@ -1145,14 +1084,14 @@ def _check_provider_health() -> str:
     if warnings:
         warn_items = "".join(f"<li>{w}</li>" for w in warnings)
         warn_html = (
-            f'<ul style="margin:4px 0 0;padding-left:18px;font-size:11px;'
-            f'color:var(--text-muted);list-style:disc">{warn_items}</ul>'
+            f'<ul style="margin:4px 0 0;padding-left:18px;font-size:var(--cds-code-01-size);'
+            f'color:var(--cds-text-secondary);list-style:disc">{warn_items}</ul>'
         )
 
     provider_msg = ""
     if not all(ok for _, ok in checks):
         provider_msg = (
-            '<span style="color:var(--text-muted);margin-left:8px">'
+            '<span style="color:var(--cds-text-secondary);margin-left:8px">'
             '&mdash; some providers offline, generation may fail</span>'
         )
 
@@ -1202,7 +1141,7 @@ def _load_results_from_dir(d: str):
     if os.path.exists(infographic_path):
         try:
             with open(infographic_path, 'r', encoding='utf-8') as f:
-                infographic_html = f'<iframe srcdoc="{f.read().replace(chr(34), "&quot;").replace(chr(10), "&#10;")}" style="width:100%;height:600px;border:1px solid #1e1e40;border-radius:8px;" sandbox="allow-same-origin"></iframe>'
+                infographic_html = f'<iframe srcdoc="{f.read().replace(chr(34), "&quot;").replace(chr(10), "&#10;")}" style="width:100%;height:600px;border:1px solid var(--cds-border-subtle-00);border-radius:0;" sandbox="allow-same-origin"></iframe>'
             infographic_file = infographic_path
         except Exception as e:
             _log.warning("Failed to read infographic HTML: %s", e)
@@ -1272,10 +1211,10 @@ _ICON_LINK = (
 )
 _ICON_EMPTY = (
     '<svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">'
-    '<rect x="4" y="6" width="20" height="16" rx="1" stroke="var(--text-muted)" stroke-width="1" fill="none" opacity="0.4"/>'
-    '<line x1="9" y1="12" x2="19" y2="12" stroke="var(--text-muted)" stroke-width="0.8" opacity="0.3"/>'
-    '<line x1="9" y1="15" x2="16" y2="15" stroke="var(--text-muted)" stroke-width="0.8" opacity="0.3"/>'
-    '<line x1="9" y1="18" x2="13" y2="18" stroke="var(--text-muted)" stroke-width="0.8" opacity="0.3"/>'
+    '<rect x="4" y="6" width="20" height="16" rx="1" stroke="var(--cds-text-secondary)" stroke-width="1" fill="none" opacity="0.4"/>'
+    '<line x1="9" y1="12" x2="19" y2="12" stroke="var(--cds-text-secondary)" stroke-width="0.8" opacity="0.3"/>'
+    '<line x1="9" y1="15" x2="16" y2="15" stroke="var(--cds-text-secondary)" stroke-width="0.8" opacity="0.3"/>'
+    '<line x1="9" y1="18" x2="13" y2="18" stroke="var(--cds-text-secondary)" stroke-width="0.8" opacity="0.3"/>'
     '</svg>'
 )
 
@@ -1481,7 +1420,7 @@ def _build_history_html(history: list[dict]) -> str:
             for i, t in enumerate(step_times):
                 lbl = step_labels[i] if i < len(step_labels) else f"S{i+1}"
                 bars.append(
-                    f'<span style="color:var(--neon-teal);font-size:10px">'
+                    f'<span style="color:var(--neon-teal);font-size:var(--cds-label-01-size)">'
                     f'{lbl}:{t:.0f}s</span>'
                 )
             step_html = (
@@ -1542,7 +1481,7 @@ def _build_script_stats_html(text: str) -> str:
     m = int(minutes)
     s = int((minutes - m) * 60)
     return (
-        f'<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);padding:4px 0">'
+        f'<div style="font-family:var(--cds-font-mono);font-size:var(--cds-code-01-size);color:var(--cds-text-secondary);padding:4px 0">'
         f'{words:,} words &middot; ~{m}m {s}s estimated audio'
         f'</div>'
     )
@@ -1597,7 +1536,7 @@ def _build_audio_metrics_html(audio_path: str | None) -> str:
         size_mb = file_size / (1024 * 1024)
         return (
             f'<div style="display:flex;gap:16px;flex-wrap:wrap;padding:6px 0;'
-            f'font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">'
+            f'font-family:var(--cds-font-mono);font-size:var(--cds-code-01-size);color:var(--cds-text-secondary)">'
             f'<span>Duration: <b style="color:var(--neon-cyan)">{mins}:{secs:02d}</b></span>'
             f'<span>Sample Rate: <b style="color:var(--neon-teal)">{sr/1000:.1f}kHz</b></span>'
             f'<span>Size: <b style="color:var(--neon-teal)">{size_mb:.1f}MB</b></span>'
@@ -1631,7 +1570,7 @@ def _build_temp_explainer_html(temp: float) -> str:
         desc, label = "Maximum randomness. Output may be incoherent — use with caution.", "CHAOTIC"
         color = "var(--neon-red)"
     return (
-        f'<div style="font-family:var(--font-mono);font-size:10px;padding:2px 0;color:var(--text-muted)">'
+        f'<div style="font-family:var(--cds-font-mono);font-size:var(--cds-label-01-size);padding:2px 0;color:var(--cds-text-secondary)">'
         f'<span style="color:{color};font-weight:600">[{label}]</span> {desc}'
         f'</div>'
     )
@@ -1687,6 +1626,12 @@ def _on_voice_preview(host_voice, cohost_voice, config_file):
 def _post_generate(notebook_id):
     """Called after generation finishes.  Updates log viewer, history, and retry button."""
     global _last_log_text, _last_failed_step
+    # Pull latest state from job if available
+    job = get_job(notebook_id) if notebook_id else None
+    if job is not None:
+        snap = job.snapshot()
+        _last_log_text = snap.get("log_text", _last_log_text)
+        _last_failed_step = snap.get("failed_step", _last_failed_step)
     log_html = _build_log_html(_last_log_text)
     history_html = ""
     if notebook_id:
@@ -1706,7 +1651,14 @@ def _on_retry(pdf_file, url_input, config_file, format_type, length, style,
               selected_source_index):
     """Re-run the pipeline, skipping to the last failed step."""
     global _last_failed_step
-    retry_step = _last_failed_step
+    # Check job-level state first, fall back to global
+    job = get_job(notebook_id) if notebook_id else None
+    retry_step = None
+    if job is not None:
+        retry_step = job.snapshot().get("failed_step")
+        remove_job(notebook_id)
+    if retry_step is None:
+        retry_step = _last_failed_step
     if retry_step is None:
         yield _empty_result("No failed step to retry.")
         return
@@ -1759,9 +1711,32 @@ def _on_notebook_switch(notebook_id):
     sources_html = _build_sources_html(sources)
     src_choices = _source_dropdown_choices(sources)
 
+    # ── Check for a running background job ───────────────────
+    progress_override = None
+    if is_running(notebook_id):
+        job = get_job(notebook_id)
+        snap = job.snapshot()
+        eta = _format_eta(snap["step_times"], snap["current_step"], snap["total_steps"])
+        progress_override = _build_progress_html(
+            snap["current_step"], snap["total_steps"],
+            f'{snap["step_label"]} — click Generate to reconnect', eta,
+        )
+    else:
+        # Check for stale "running" state from a process crash
+        stale = load_stale_state(nb_dir)
+        if stale is not None:
+            progress_override = _build_progress_html(
+                stale.get("current_step", 0), stale.get("total_steps", 0),
+                "Previous run interrupted (process crash) — partial results may be available",
+            )
+
     results = _load_results_from_dir(nb_dir)
     if results is None:
         results = _empty_outputs()
+
+    # If there's a running-job banner, override the progress display
+    if progress_override is not None:
+        results = (progress_override, *results[1:])
 
     history_html = _build_history_html(_notebook_mgr.get_history(notebook_id))
 
@@ -2110,183 +2085,75 @@ def _empty_result(status_msg):
     return (status_msg, None, "", "", "", None, None, None, None)
 
 
-def process_podcast(pdf_file, url_input, config_file, format_type, length, style,
-                    language, additional_preference, output_dir, skip_to,
-                    outputs_to_generate, notebook_id,
-                    host_voice="", cohost_voice="", temperature=0.7,
-                    selected_source_index=None, _source_file_override=None):
-    """Generator that yields step-by-step progress then a final result tuple."""
-    global _last_failed_step, _last_log_text
-    _last_failed_step = None
+def _pipeline_worker(job: PipelineJob, input_path, config, skip_to,
+                     outputs_to_generate, format_type, length, style,
+                     language, full_preference, notebook_id):
+    """Run the step1-step5 pipeline in a background thread.
 
-    # Install log capture for this run
+    This is a regular function (NOT a generator).  It mutates *job*
+    via ``job.update()`` so the polling generator can relay progress
+    to the Gradio frontend.
+    """
+    import json as _json
+    from pathlib import Path as _Path
+    from local_notebooklm.config import validate_config, base_config
+    from local_notebooklm.steps.helpers import set_provider
+    from local_notebooklm.steps.step1 import step1
+    from local_notebooklm.steps.step2 import step2
+    from local_notebooklm.steps.step3 import step3
+    from local_notebooklm.steps.step4 import step4
+    from local_notebooklm.steps.step5 import step5
+
     capture = _LogCapture()
     _logging.getLogger("local_notebooklm").addHandler(capture)
-    gen_start = time.time()
 
-    # ── Resolve input source ─────────────────────────────────
-    # Priority: override > fresh URL > fresh file upload > selected source > first notebook source
-    input_path = _source_file_override
-    if input_path is None and url_input and url_input.strip():
-        input_path = url_input.strip()
-    elif input_path is None and pdf_file is not None:
-        input_path = pdf_file.name if hasattr(pdf_file, 'name') else pdf_file
-    elif input_path is None and notebook_id:
-        sources = _notebook_mgr.get_sources(notebook_id)
-        nb_dir = _notebook_mgr.get_notebook_dir(notebook_id)
-        # Use the source selected in the dropdown, or fall back to the first one
-        target_sources = sources
-        if selected_source_index is not None and 0 <= selected_source_index < len(sources):
-            target_sources = [sources[selected_source_index]]
-        for src in target_sources:
-            if src.get("type") == "file":
-                fp = os.path.join(nb_dir, "sources", src["filename"])
-                if os.path.exists(fp):
-                    input_path = fp
-                    break
-            elif src.get("type") == "url":
-                input_path = src["url"]
-                break
+    output_dir = job.output_dir
 
-    if input_path is None and (skip_to is None or skip_to <= 1):
-        yield _empty_result("Please upload a document or enter a URL.")
-        return
+    want_audio = "Podcast Audio" in outputs_to_generate
+    want_html = "Infographic HTML" in outputs_to_generate
+    want_png = "Infographic PNG" in outputs_to_generate
+    want_pptx = "PPTX Slides" in outputs_to_generate
+    want_any_infographic = want_html or want_png or want_pptx
 
-    # ── Resolve output directory ─────────────────────────────
-    if not output_dir:
-        if notebook_id:
-            output_dir = _notebook_mgr.get_notebook_dir(notebook_id)
+    total_steps = 1
+    if want_audio:
+        total_steps += 3
+    if want_any_infographic:
+        total_steps += 1
+
+    job.update(total_steps=total_steps)
+
+    selected = ", ".join(outputs_to_generate)
+    print(f"Processing with output_dir: {output_dir}")
+    print(f"Generating: {selected}")
+
+    output_base = _Path(output_dir)
+    output_dirs = {f"step{i}": output_base / f"step{i}" for i in range(1, 6)}
+    for dp in output_dirs.values():
+        dp.mkdir(parents=True, exist_ok=True)
+
+    small_text_client = set_provider(config=config["Small-Text-Model"]["provider"])
+    big_text_client = set_provider(config=config["Big-Text-Model"]["provider"])
+    tts_client = set_provider(config=config["Text-To-Speech-Model"]["provider"]) if want_audio else None
+
+    system_prompts = {}
+    for sn in ["step1", "step2", "step3"]:
+        if sn in config and "system" in config[sn]:
+            system_prompts[sn] = config[sn]["system"]
+        elif "system" in config:
+            system_prompts[sn] = config["system"]
         else:
-            output_dir = "./local_notebooklm/web_ui/output"
+            system_prompts[sn] = None
+
+    current_step = 0
+    cleaned_text_file = None
+    transcript_file = None
+    step_times: list[float] = []
 
     try:
-        os.makedirs(output_dir, exist_ok=True)
-    except Exception as e:
-        yield _empty_result(f"Failed to create output directory: {str(e)}")
-        return
-
-    if not outputs_to_generate:
-        yield _empty_result("Please select at least one output to generate.")
-        return
-
-    # ── Disk space check ─────────────────────────────────
-    try:
-        disk = shutil.disk_usage(output_dir)
-        free_mb = disk.free / (1024 * 1024)
-        if free_mb < 500:
-            yield _empty_result(
-                f"Low disk space: {free_mb:.0f} MB free. At least 500 MB recommended. "
-                "Free up space before generating."
-            )
-            return
-    except Exception:
-        pass  # disk_usage may not work on all platforms
-
-    try:
-        # ── Load config ──────────────────────────────────────
-        import json as _json
-        from pathlib import Path as _Path
-        from local_notebooklm.config import validate_config, ConfigValidationError, base_config
-        from local_notebooklm.steps.helpers import set_provider
-        from local_notebooklm.steps.step1 import step1
-        from local_notebooklm.steps.step2 import step2
-        from local_notebooklm.steps.step3 import step3
-        from local_notebooklm.steps.step4 import step4
-        from local_notebooklm.steps.step5 import step5
-
-        if config_file is not None:
-            config_path = config_file.name if hasattr(config_file, 'name') else config_file
-            with open(config_path, 'r') as f:
-                config = _json.load(f)
-        else:
-            ollama_cfg = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                "ollama_config.json",
-            )
-            if os.path.exists(ollama_cfg):
-                with open(ollama_cfg, 'r') as f:
-                    config = _json.load(f)
-            else:
-                config = base_config
-
-        try:
-            validate_config(config)
-        except ConfigValidationError as e:
-            yield _empty_result(f"Invalid configuration: {e}")
-            return
-
-        # ── Apply UI overrides (voice, temperature) ──────────
-        if host_voice and str(host_voice).strip():
-            config["Host-Speaker-Voice"] = str(host_voice).strip()
-        if cohost_voice and str(cohost_voice).strip():
-            config["Co-Host-Speaker-1-Voice"] = str(cohost_voice).strip()
-        if temperature is not None:
-            temp_val = float(temperature)
-            for step_key in ["Step1", "Step2", "Step3"]:
-                if step_key in config:
-                    config[step_key]["temperature"] = temp_val
-
-        # ── Determine outputs & total steps ──────────────────
-        want_audio = "Podcast Audio" in outputs_to_generate
-        want_html = "Infographic HTML" in outputs_to_generate
-        want_png = "Infographic PNG" in outputs_to_generate
-        want_pptx = "PPTX Slides" in outputs_to_generate
-        want_any_infographic = want_html or want_png or want_pptx
-
-        # Steps 2-3 (transcript generation) only needed for audio
-        total_steps = 1  # step 1 always runs
-        if want_audio:
-            total_steps += 3  # steps 2, 3, 4
-        if want_any_infographic:
-            total_steps += 1  # step 5
-
-        selected = ", ".join(outputs_to_generate)
-        print(f"Processing with output_dir: {output_dir}")
-        print(f"Generating: {selected}")
-
-        # ── Create output directories ────────────────────────
-        output_base = _Path(output_dir)
-        output_dirs = {f"step{i}": output_base / f"step{i}" for i in range(1, 6)}
-        for dp in output_dirs.values():
-            dp.mkdir(parents=True, exist_ok=True)
-
-        # ── Set up LLM / TTS clients ────────────────────────
-        small_text_client = set_provider(config=config["Small-Text-Model"]["provider"])
-        big_text_client = set_provider(config=config["Big-Text-Model"]["provider"])
-        tts_client = set_provider(config=config["Text-To-Speech-Model"]["provider"]) if want_audio else None
-
-        # ── System prompts per step ──────────────────────────
-        system_prompts = {}
-        for sn in ["step1", "step2", "step3"]:
-            if sn in config and "system" in config[sn]:
-                system_prompts[sn] = config[sn]["system"]
-            elif "system" in config:
-                system_prompts[sn] = config["system"]
-            else:
-                system_prompts[sn] = None
-
-        # ── Speaker personality injection ──────────────────
-        full_preference = additional_preference or ""
-        if notebook_id:
-            nb_settings = _notebook_mgr.get_settings(notebook_id)
-            personality = nb_settings.get("speaker_personality", "")
-            if personality and personality.strip():
-                full_preference = (
-                    f"SPEAKER PERSONALITIES:\n{personality.strip()}\n\n"
-                    + full_preference
-                )
-        full_preference = full_preference.strip() or None
-
-        current_step = 0
-        cleaned_text_file = None
-        transcript_file = None
-        step_times: list[float] = []
-        step_start = time.time()
-
         # ── Step 1: Extract text ─────────────────────────────
         current_step += 1
-        eta = _format_eta(step_times, current_step, total_steps)
-        yield _empty_result(_build_progress_html(current_step, total_steps, "Extracting text from document...", eta))
+        job.update(current_step=current_step, step_label="Extracting text from document...")
         step_start = time.time()
 
         if not skip_to or skip_to <= 1:
@@ -2302,16 +2169,24 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
             if step1_files:
                 cleaned_text_file = str(sorted(step1_files, key=lambda x: x.stat().st_mtime, reverse=True)[0])
             else:
-                yield _empty_result("No output files from Step 1. Cannot skip.")
+                job.update(status="failed", error="No output files from Step 1. Cannot skip.",
+                           failed_step=current_step, log_text=capture.get_text())
+                _logging.getLogger("local_notebooklm").removeHandler(capture)
                 return
 
-        # ── Steps 2-4: Podcast pipeline (only when audio selected) ──
         step_times.append(time.time() - step_start)
+        job.update(step_times=list(step_times))
+
+        if job.cancel_event.is_set():
+            job.update(status="cancelled", log_text=capture.get_text())
+            _logging.getLogger("local_notebooklm").removeHandler(capture)
+            return
+
+        # ── Steps 2-4: Podcast pipeline ──────────────────────
         if want_audio:
-            # ── Step 2: Generate transcript ──────────────────
+            # ── Step 2 ───────────────────────────────────────
             current_step += 1
-            eta = _format_eta(step_times, current_step, total_steps)
-            yield _empty_result(_build_progress_html(current_step, total_steps, "Generating transcript...", eta))
+            job.update(current_step=current_step, step_label="Generating transcript...")
             step_start = time.time()
 
             if not skip_to or skip_to <= 2:
@@ -2331,14 +2206,22 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
                 if step2_files:
                     transcript_file = str(sorted(step2_files, key=lambda x: x.stat().st_mtime, reverse=True)[0])
                 else:
-                    yield _empty_result("No output files from Step 2. Cannot skip.")
+                    job.update(status="failed", error="No output files from Step 2. Cannot skip.",
+                               failed_step=current_step, log_text=capture.get_text())
+                    _logging.getLogger("local_notebooklm").removeHandler(capture)
                     return
 
-            # ── Step 3: Optimize for TTS ─────────────────────
             step_times.append(time.time() - step_start)
+            job.update(step_times=list(step_times))
+
+            if job.cancel_event.is_set():
+                job.update(status="cancelled", log_text=capture.get_text())
+                _logging.getLogger("local_notebooklm").removeHandler(capture)
+                return
+
+            # ── Step 3 ───────────────────────────────────────
             current_step += 1
-            eta = _format_eta(step_times, current_step, total_steps)
-            yield _empty_result(_build_progress_html(current_step, total_steps, "Optimizing for text-to-speech...", eta))
+            job.update(current_step=current_step, step_label="Optimizing for text-to-speech...")
             step_start = time.time()
 
             if not skip_to or skip_to <= 3:
@@ -2352,11 +2235,17 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
                     language=language,
                 )
 
-            # ── Step 4: Generate audio ───────────────────────
             step_times.append(time.time() - step_start)
+            job.update(step_times=list(step_times))
+
+            if job.cancel_event.is_set():
+                job.update(status="cancelled", log_text=capture.get_text())
+                _logging.getLogger("local_notebooklm").removeHandler(capture)
+                return
+
+            # ── Step 4 ───────────────────────────────────────
             current_step += 1
-            eta = _format_eta(step_times, current_step, total_steps)
-            yield _empty_result(_build_progress_html(current_step, total_steps, "Generating audio...", eta))
+            job.update(current_step=current_step, step_label="Generating audio...")
             step_start = time.time()
 
             if not skip_to or skip_to <= 4:
@@ -2366,17 +2255,22 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
                     input_dir=str(output_dirs["step3"]),
                     output_dir=str(output_dirs["step4"]),
                 )
+
             step_times.append(time.time() - step_start)
+            job.update(step_times=list(step_times))
+
+            if job.cancel_event.is_set():
+                job.update(status="cancelled", log_text=capture.get_text())
+                _logging.getLogger("local_notebooklm").removeHandler(capture)
+                return
 
         # ── Step 5: Generate infographic ─────────────────────
         if want_any_infographic:
             current_step += 1
-            eta = _format_eta(step_times, current_step, total_steps)
-            yield _empty_result(_build_progress_html(current_step, total_steps, "Generating infographic...", eta))
+            job.update(current_step=current_step, step_label="Generating infographic...")
             step_start = time.time()
 
             if not skip_to or skip_to <= 5:
-                # Use step3 output if audio ran, otherwise step1 (raw text)
                 step5_input = str(output_dirs["step3"]) if want_audio else str(output_dirs["step1"])
                 try:
                     step5(
@@ -2390,102 +2284,48 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
                     )
                 except Exception as e:
                     _log.warning("Step 5 (infographic) failed (non-fatal): %s", e)
+
             step_times.append(time.time() - step_start)
+            job.update(step_times=list(step_times))
 
-        # ── Collect results ──────────────────────────────────
-        audio_path = None
-        if want_audio:
-            for subdir in [os.path.join(output_dir, "step4"), output_dir]:
-                for ext in ["wav", "mp3", "ogg", "flac", "aac"]:
-                    candidate = os.path.join(subdir, f"podcast.{ext}")
-                    if os.path.exists(candidate):
-                        audio_path = candidate
-                        break
-                if audio_path:
-                    break
-
-        file_contents = {}
-        for rel in ["step1/extracted_text.txt", "step1/clean_extracted_text.txt", "step3/podcast_ready_data.txt"]:
-            full_path = os.path.join(output_dir, rel)
-            if os.path.exists(full_path):
-                try:
-                    with open(full_path, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                        file_contents[rel] = content[:1000] + "..." if len(content) > 1000 else content
-                except Exception as e:
-                    _log.warning("Failed to read pipeline output %s: %s", rel, e)
-
-        infographic_html = None
-        infographic_file = None
-        infographic_path = os.path.join(output_dir, "step5", "infographic.html")
-        if os.path.exists(infographic_path):
-            try:
-                with open(infographic_path, 'r', encoding='utf-8') as f:
-                    raw = f.read()
-                    infographic_html = (
-                        f'<iframe srcdoc="{raw.replace(chr(34), "&quot;").replace(chr(10), "&#10;")}"'
-                        f' style="width:100%;height:600px;border:1px solid #1e1e40;border-radius:8px;"'
-                        f' sandbox="allow-same-origin"></iframe>'
-                    )
-                infographic_file = infographic_path
-            except Exception as e:
-                _log.warning("Failed to read infographic HTML: %s", e)
-
-        png_image = None
-        png_path = os.path.join(output_dir, "step5", "infographic.png")
-        if os.path.exists(png_path):
-            png_image = png_path
-
-        pptx_file = None
-        pptx_path = os.path.join(output_dir, "step5", "infographic.pptx")
-        if os.path.exists(pptx_path):
-            pptx_file = pptx_path
-
-        generated = []
-        if audio_path:
-            generated.append("Audio")
-        if infographic_html:
-            generated.append("Infographic HTML")
-        if png_image:
-            generated.append("Infographic PNG")
-        if pptx_file:
-            generated.append("PPTX")
-
-        gen_label = f"Generated: {', '.join(generated)}" if generated else "Complete"
-        status_msg = _build_progress_html(total_steps, total_steps, gen_label, complete=True)
-
-        # Record success in history
-        _last_log_text = capture.get_text()
+        # ── Record success ───────────────────────────────────
+        log_text = capture.get_text()
         _logging.getLogger("local_notebooklm").removeHandler(capture)
+
         if notebook_id:
             from datetime import datetime, timezone
-            _notebook_mgr.add_history_entry(notebook_id, {
+            generated = []
+            # Check what was actually produced
+            for subdir in [os.path.join(output_dir, "step4"), output_dir]:
+                for ext in ["wav", "mp3", "ogg", "flac", "aac"]:
+                    if os.path.exists(os.path.join(subdir, f"podcast.{ext}")):
+                        generated.append("Audio")
+                        break
+                if "Audio" in generated:
+                    break
+            if os.path.exists(os.path.join(output_dir, "step5", "infographic.html")):
+                generated.append("Infographic HTML")
+            if os.path.exists(os.path.join(output_dir, "step5", "infographic.png")):
+                generated.append("Infographic PNG")
+            if os.path.exists(os.path.join(output_dir, "step5", "infographic.pptx")):
+                generated.append("PPTX")
+
+            entry = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "format": format_type, "length": length, "style": style,
                 "language": language,
-                "duration_s": round(time.time() - gen_start, 1),
+                "duration_s": round(time.time() - job.gen_start, 1),
                 "status": "success",
                 "outputs": generated,
                 "step_times": [round(t, 1) for t in step_times],
-            })
+            }
+            _notebook_mgr.add_history_entry(notebook_id, entry)
 
-        yield (
-            status_msg,
-            audio_path,
-            file_contents.get("step1/extracted_text.txt", ""),
-            file_contents.get("step1/clean_extracted_text.txt", ""),
-            file_contents.get("step3/podcast_ready_data.txt", ""),
-            infographic_html,
-            infographic_file,
-            png_image,
-            pptx_file,
-        )
+        job.update(status="completed", log_text=log_text)
 
     except Exception as e:
         import traceback
-        # Determine which step failed for retry
-        _last_failed_step = current_step
-        _last_log_text = capture.get_text()
+        log_text = capture.get_text()
         _logging.getLogger("local_notebooklm").removeHandler(capture)
 
         if notebook_id:
@@ -2494,26 +2334,263 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "format": format_type, "length": length, "style": style,
                 "language": language,
-                "duration_s": round(time.time() - gen_start, 1),
+                "duration_s": round(time.time() - job.gen_start, 1),
                 "status": "failed",
                 "outputs": [],
                 "error": str(e)[:200],
             })
 
-        diagnosis = _diagnose_error(e, _last_failed_step)
-        diag_html = ""
-        if diagnosis:
-            diag_html = (
-                f'<div style="margin-top:6px;padding:6px 10px;background:rgba(0,240,255,0.04);'
-                f'border-left:2px solid var(--neon-teal);font-family:var(--font-mono);'
-                f'font-size:11px;color:var(--neon-teal)">'
-                f'Suggestion: {diagnosis}</div>'
-            )
-        yield _empty_result(
-            _build_progress_html(0, 0, f"Step {_last_failed_step or '?'} failed: {e}")
-            + diag_html
-            + f'\n<details><summary>Full traceback</summary><pre>{traceback.format_exc()}</pre></details>'
+        job.update(
+            status="failed",
+            error=str(e)[:500] + "\n" + traceback.format_exc(),
+            failed_step=current_step,
+            log_text=log_text,
         )
+
+
+def process_podcast(pdf_file, url_input, config_file, format_type, length, style,
+                    language, additional_preference, output_dir, skip_to,
+                    outputs_to_generate, notebook_id,
+                    host_voice="", cohost_voice="", temperature=0.7,
+                    selected_source_index=None, _source_file_override=None):
+    """Thin polling generator — starts a background worker and yields progress.
+
+    If the browser disconnects and the user clicks Generate again, this
+    reconnects to the already-running job instead of starting a new one.
+    """
+    global _last_failed_step, _last_log_text
+
+    # ── Reconnect to an existing running job ─────────────────
+    if notebook_id and is_running(notebook_id):
+        job = get_job(notebook_id)
+        while True:
+            snap = job.snapshot()
+            if snap["status"] == "completed":
+                _last_log_text = snap["log_text"]
+                _last_failed_step = None
+                result = _load_results_from_dir(job.output_dir)
+                if result is None:
+                    result = _empty_outputs()
+                yield (
+                    _build_progress_html(snap["total_steps"], snap["total_steps"],
+                                         "Complete — reconnected", complete=True),
+                    *result[1:],
+                )
+                remove_job(notebook_id)
+                return
+            elif snap["status"] in ("failed", "cancelled"):
+                _last_failed_step = snap.get("failed_step")
+                _last_log_text = snap["log_text"]
+                err = snap.get("error", "Unknown error")
+                diagnosis = _diagnose_error(Exception(err), _last_failed_step)
+                diag_html = ""
+                if diagnosis:
+                    diag_html = (
+                        f'<div style="margin-top:6px;padding:6px 10px;background:rgba(0,240,255,0.04);'
+                        f'border-left:2px solid var(--neon-teal);font-family:var(--cds-font-mono);'
+                        f'font-size:var(--cds-code-01-size);color:var(--neon-teal)">'
+                        f'Suggestion: {diagnosis}</div>'
+                    )
+                yield _empty_result(
+                    _build_progress_html(0, 0, f"Step {_last_failed_step or '?'} failed: {err.split(chr(10))[0]}")
+                    + diag_html
+                )
+                remove_job(notebook_id)
+                return
+            else:
+                eta = _format_eta(snap["step_times"], snap["current_step"], snap["total_steps"])
+                yield _empty_result(
+                    _build_progress_html(snap["current_step"], snap["total_steps"],
+                                         snap["step_label"], eta)
+                )
+                time.sleep(1.5)
+
+    # ── Validation (runs in the Gradio thread, lightweight) ──
+    _last_failed_step = None
+
+    input_path = _source_file_override
+    if input_path is None and url_input and url_input.strip():
+        input_path = url_input.strip()
+    elif input_path is None and pdf_file is not None:
+        input_path = pdf_file.name if hasattr(pdf_file, 'name') else pdf_file
+    elif input_path is None and notebook_id:
+        sources = _notebook_mgr.get_sources(notebook_id)
+        nb_dir = _notebook_mgr.get_notebook_dir(notebook_id)
+        target_sources = sources
+        if selected_source_index is not None and 0 <= selected_source_index < len(sources):
+            target_sources = [sources[selected_source_index]]
+        for src in target_sources:
+            if src.get("type") == "file":
+                fp = os.path.join(nb_dir, "sources", src["filename"])
+                if os.path.exists(fp):
+                    input_path = fp
+                    break
+            elif src.get("type") == "url":
+                input_path = src["url"]
+                break
+
+    if input_path is None and (skip_to is None or skip_to <= 1):
+        yield _empty_result("Please upload a document or enter a URL.")
+        return
+
+    if not output_dir:
+        if notebook_id:
+            output_dir = _notebook_mgr.get_notebook_dir(notebook_id)
+        else:
+            output_dir = "./local_notebooklm/web_ui/output"
+
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+    except Exception as e:
+        yield _empty_result(f"Failed to create output directory: {str(e)}")
+        return
+
+    if not outputs_to_generate:
+        yield _empty_result("Please select at least one output to generate.")
+        return
+
+    try:
+        disk = shutil.disk_usage(output_dir)
+        free_mb = disk.free / (1024 * 1024)
+        if free_mb < 500:
+            yield _empty_result(
+                f"Low disk space: {free_mb:.0f} MB free. At least 500 MB recommended. "
+                "Free up space before generating."
+            )
+            return
+    except Exception:
+        pass
+
+    # ── Load & validate config (still in Gradio thread) ──────
+    import json as _json
+    from local_notebooklm.config import validate_config, ConfigValidationError, base_config
+
+    if config_file is not None:
+        config_path = config_file.name if hasattr(config_file, 'name') else config_file
+        with open(config_path, 'r') as f:
+            config = _json.load(f)
+    else:
+        ollama_cfg = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "ollama_config.json",
+        )
+        if os.path.exists(ollama_cfg):
+            with open(ollama_cfg, 'r') as f:
+                config = _json.load(f)
+        else:
+            config = base_config
+
+    try:
+        validate_config(config)
+    except ConfigValidationError as e:
+        yield _empty_result(f"Invalid configuration: {e}")
+        return
+
+    if host_voice and str(host_voice).strip():
+        config["Host-Speaker-Voice"] = str(host_voice).strip()
+    if cohost_voice and str(cohost_voice).strip():
+        config["Co-Host-Speaker-1-Voice"] = str(cohost_voice).strip()
+    if temperature is not None:
+        temp_val = float(temperature)
+        for step_key in ["Step1", "Step2", "Step3"]:
+            if step_key in config:
+                config[step_key]["temperature"] = temp_val
+
+    # Speaker personality injection
+    full_preference = additional_preference or ""
+    if notebook_id:
+        nb_settings = _notebook_mgr.get_settings(notebook_id)
+        personality = nb_settings.get("speaker_personality", "")
+        if personality and personality.strip():
+            full_preference = (
+                f"SPEAKER PERSONALITIES:\n{personality.strip()}\n\n"
+                + full_preference
+            )
+    full_preference = full_preference.strip() or None
+
+    # ── Spawn background worker ──────────────────────────────
+    job_id = notebook_id or "default"
+    job = start_job(
+        notebook_id=job_id,
+        output_dir=output_dir,
+        worker_fn=_pipeline_worker,
+        worker_args=(input_path, config, skip_to, outputs_to_generate,
+                     format_type, length, style, language, full_preference,
+                     notebook_id),
+    )
+
+    # ── Poll loop ────────────────────────────────────────────
+    while True:
+        snap = job.snapshot()
+
+        if snap["status"] == "completed":
+            _last_log_text = snap["log_text"]
+            _last_failed_step = None
+            result = _load_results_from_dir(output_dir)
+            if result is None:
+                result = _empty_outputs()
+
+            generated_parts = []
+            if result[1]:  # audio_path
+                generated_parts.append("Audio")
+            if result[5]:  # infographic_html
+                generated_parts.append("Infographic HTML")
+            if result[7]:  # png_image
+                generated_parts.append("Infographic PNG")
+            if result[8]:  # pptx_file
+                generated_parts.append("PPTX")
+
+            gen_label = f"Generated: {', '.join(generated_parts)}" if generated_parts else "Complete"
+            yield (
+                _build_progress_html(snap["total_steps"], snap["total_steps"],
+                                     gen_label, complete=True),
+                *result[1:],
+            )
+            remove_job(job_id)
+            return
+
+        elif snap["status"] in ("failed", "cancelled"):
+            _last_failed_step = snap.get("failed_step")
+            _last_log_text = snap["log_text"]
+            err = snap.get("error", "Unknown error")
+            err_first_line = err.split("\n")[0]
+            diagnosis = _diagnose_error(Exception(err_first_line), _last_failed_step)
+            diag_html = ""
+            if diagnosis:
+                diag_html = (
+                    f'<div style="margin-top:6px;padding:6px 10px;background:rgba(0,240,255,0.04);'
+                    f'border-left:2px solid var(--neon-teal);font-family:var(--cds-font-mono);'
+                    f'font-size:var(--cds-code-01-size);color:var(--neon-teal)">'
+                    f'Suggestion: {diagnosis}</div>'
+                )
+            # Include traceback if available
+            tb_html = ""
+            if "\n" in err:
+                tb_text = err[err.index("\n")+1:]
+                if tb_text.strip():
+                    escaped_tb = (tb_text.replace("&", "&amp;").replace("<", "&lt;")
+                                  .replace(">", "&gt;"))
+                    tb_html = f'\n<details><summary>Full traceback</summary><pre>{escaped_tb}</pre></details>'
+            yield _empty_result(
+                _build_progress_html(0, 0, f"Step {_last_failed_step or '?'} failed: {err_first_line}")
+                + diag_html + tb_html
+            )
+            remove_job(job_id)
+            return
+
+        else:
+            eta = _format_eta(snap["step_times"], snap["current_step"], snap["total_steps"])
+            yield _empty_result(
+                _build_progress_html(snap["current_step"], snap["total_steps"],
+                                     snap["step_label"], eta)
+            )
+            time.sleep(1.5)
+
+
+def _on_stop(notebook_id):
+    """Cancel the background pipeline job for the given notebook."""
+    job_id = notebook_id or "default"
+    cancel_job(job_id)
 
 
 # ---------------------------------------------------------------------------
@@ -2703,7 +2780,7 @@ def create_gradio_ui():
                     )
 
                     # Settings 2x2 grid
-                    gr.HTML('<div class="cyber-card-label" style="margin-top:0.8rem">// Settings</div>')
+                    gr.HTML('<div class="cyber-card-label" style="margin-top:0.8rem">Settings</div>')
                     with gr.Row():
                         format_type = gr.Dropdown(
                             choices=format_options,
@@ -2978,8 +3055,8 @@ def create_gradio_ui():
 
         # ── Wiring — Cancel / Stop ───────────────────────────
         stop_button.click(
-            fn=None,
-            inputs=None,
+            fn=_on_stop,
+            inputs=[notebook_selector],
             outputs=None,
             cancels=[gen_event, batch_event],
         )
