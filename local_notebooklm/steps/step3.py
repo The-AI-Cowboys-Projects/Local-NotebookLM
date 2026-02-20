@@ -316,8 +316,15 @@ def generate_rewritten_transcript_with_overlap(
                     pass
 
                 if not chunk_data:
-                    logger.error(f"All parsers failed on chunk {i+1}. Raw (300 chars): {chunk_transcript[:300]}...")
-                    raise TranscriptGenerationError(f"Failed to parse chunk {i+1} after all strategies")
+                    # Last resort: treat entire chunk output as monologue
+                    mono = re.sub(r'[\[\]\(\)\{\}]', ' ', chunk_transcript)
+                    mono = re.sub(r'\s+', ' ', mono).strip()
+                    if len(mono) > 20:
+                        logger.warning(f"Using monologue fallback for chunk {i+1} ({len(mono)} chars)")
+                        chunk_data = [("Speaker 1", mono)]
+                    else:
+                        logger.error(f"All parsers failed on chunk {i+1}. Raw (300 chars): {chunk_transcript[:300]}...")
+                        raise TranscriptGenerationError(f"Failed to parse chunk {i+1} after all strategies")
 
             # Filter goodbye-like messages in non-final chunks
             if not is_final_chunk:
@@ -426,12 +433,19 @@ def step3(
                 pass
 
         if not parsed:
-            logger.error(f"All parsing strategies failed. Raw (300 chars): {transcript[:300]}...")
-            raise TranscriptGenerationError(
-                "Could not parse transcript into speaker-dialogue pairs after all strategies "
-                "(literal_eval, regex tuples, plain dialogue, JSON, monologue fallback). "
-                "The LLM model may be too small for structured output — try a larger model (3b+)."
-            )
+            # Last resort: force monologue from raw LLM output
+            mono = re.sub(r'[\[\]\(\)\{\}]', ' ', transcript)
+            mono = re.sub(r'\s+', ' ', mono).strip()
+            if len(mono) > 20:
+                logger.warning(f"All strategies failed — forcing monologue fallback ({len(mono)} chars)")
+                parsed = [("Speaker 1", mono)]
+            else:
+                logger.error(f"All parsing strategies failed. Raw (300 chars): {transcript[:300]}...")
+                raise TranscriptGenerationError(
+                    "Could not parse transcript into speaker-dialogue pairs after all strategies "
+                    "(literal_eval, regex tuples, plain dialogue, JSON, monologue fallback). "
+                    "The LLM model may be too small for structured output — try a larger model (3b+)."
+                )
 
         # Use the parsed list as the canonical transcript
         transcript = str(parsed)
