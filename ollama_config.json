@@ -10,7 +10,7 @@
             "name": "ollama",
             "key": "not-needed"
         },
-        "model": "llama3.2:1b"
+        "model": "llama3.2:3b"
     },
 
     "Big-Text-Model": {
@@ -18,7 +18,7 @@
             "name": "ollama",
             "key": "not-needed"
         },
-        "model": "llama3.2:1b"
+        "model": "llama3.2:3b"
     },
 
     "Text-To-Speech-Model": {
