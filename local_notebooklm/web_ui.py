@@ -1702,7 +1702,8 @@ def _post_generate(notebook_id):
 def _on_retry(pdf_file, url_input, config_file, format_type, length, style,
               language, additional_preference, output_dir, skip_to,
               outputs_to_generate, notebook_id,
-              host_voice, cohost_voice, temperature):
+              host_voice, cohost_voice, temperature,
+              selected_source_index):
     """Re-run the pipeline, skipping to the last failed step."""
     global _last_failed_step
     retry_step = _last_failed_step
@@ -1715,6 +1716,7 @@ def _on_retry(pdf_file, url_input, config_file, format_type, length, style,
         language, additional_preference, output_dir, retry_step,
         outputs_to_generate, notebook_id,
         host_voice, cohost_voice, temperature,
+        selected_source_index=selected_source_index,
     )
 
 
@@ -2112,7 +2114,7 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
                     language, additional_preference, output_dir, skip_to,
                     outputs_to_generate, notebook_id,
                     host_voice="", cohost_voice="", temperature=0.7,
-                    _source_file_override=None):
+                    selected_source_index=None, _source_file_override=None):
     """Generator that yields step-by-step progress then a final result tuple."""
     global _last_failed_step, _last_log_text
     _last_failed_step = None
@@ -2123,7 +2125,7 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
     gen_start = time.time()
 
     # ── Resolve input source ─────────────────────────────────
-    # Priority: override > fresh URL > fresh file upload > notebook stored sources
+    # Priority: override > fresh URL > fresh file upload > selected source > first notebook source
     input_path = _source_file_override
     if input_path is None and url_input and url_input.strip():
         input_path = url_input.strip()
@@ -2132,7 +2134,11 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
     elif input_path is None and notebook_id:
         sources = _notebook_mgr.get_sources(notebook_id)
         nb_dir = _notebook_mgr.get_notebook_dir(notebook_id)
-        for src in sources:
+        # Use the source selected in the dropdown, or fall back to the first one
+        target_sources = sources
+        if selected_source_index is not None and 0 <= selected_source_index < len(sources):
+            target_sources = [sources[selected_source_index]]
+        for src in target_sources:
             if src.get("type") == "file":
                 fp = os.path.join(nb_dir, "sources", src["filename"])
                 if os.path.exists(fp):
@@ -2932,6 +2938,7 @@ def create_gradio_ui():
             language, additional_preference, output_dir, skip_to,
             outputs_to_generate, notebook_selector,
             host_voice, cohost_voice, temperature_slider,
+            source_selector,
         ]
         generate_outputs = [
             progress_display, audio_output, extracted_text, clean_text,
