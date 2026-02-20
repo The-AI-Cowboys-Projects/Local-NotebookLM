@@ -1089,6 +1089,10 @@ _PRESETS: dict[str, dict] = {
         "format": "explainer", "length": "medium", "style": "gen-z",
         "temperature": 1.0,
     },
+    "Fast Mode": {
+        "format": "summary", "length": "short", "style": "normal",
+        "temperature": 0.3,
+    },
 }
 
 
@@ -1453,7 +1457,7 @@ def _build_log_html(log_text: str) -> str:
 
 
 def _build_history_html(history: list[dict]) -> str:
-    """Build generation history timeline HTML."""
+    """Build generation history timeline HTML with per-step profiling."""
     if not history:
         return '<div class="history-empty">No generation history yet.</div>'
     items = []
@@ -1468,13 +1472,29 @@ def _build_history_html(history: list[dict]) -> str:
         outputs = ", ".join(entry.get("outputs", [])) or "none"
         error = entry.get("error", "")
         err_html = f'<div class="hist-err">{error[:120]}</div>' if error else ""
+        # Step profiling
+        step_times = entry.get("step_times", [])
+        step_html = ""
+        if step_times:
+            step_labels = ["Extract", "Script", "TTS-Prep", "Audio", "Visual"]
+            bars = []
+            for i, t in enumerate(step_times):
+                lbl = step_labels[i] if i < len(step_labels) else f"S{i+1}"
+                bars.append(
+                    f'<span style="color:var(--neon-teal);font-size:10px">'
+                    f'{lbl}:{t:.0f}s</span>'
+                )
+            step_html = (
+                f'<div style="width:100%;display:flex;gap:8px;flex-wrap:wrap;'
+                f'margin-top:2px">{" ".join(bars)}</div>'
+            )
         items.append(
             f'<div class="hist-entry {status_cls}">'
             f'<span class="hist-ts">{ts}</span>'
             f'<span class="hist-badge">{fmt} / {style} / {length}</span>'
             f'<span class="hist-dur">{dur:.0f}s</span>'
             f'<span class="hist-out">{outputs}</span>'
-            f'{err_html}'
+            f'{step_html}{err_html}'
             f'</div>'
         )
     return '<div class="history-timeline">' + "".join(items) + '</div>'
@@ -1511,6 +1531,157 @@ def _on_download_script(script_text, notebook_id):
     tmp.write("\n".join(md_lines))
     tmp.close()
     return tmp.name
+
+
+def _build_script_stats_html(text: str) -> str:
+    """Live word count + estimated audio duration for the podcast script."""
+    if not text or not text.strip():
+        return ""
+    words = len(text.split())
+    minutes = words / 150  # ~150 wpm for TTS
+    m = int(minutes)
+    s = int((minutes - m) * 60)
+    return (
+        f'<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);padding:4px 0">'
+        f'{words:,} words &middot; ~{m}m {s}s estimated audio'
+        f'</div>'
+    )
+
+
+def _diagnose_error(error: Exception, step: int | None = None) -> str:
+    """Map common pipeline errors to user-friendly diagnostics with remedies."""
+    msg = str(error).lower()
+    hints = []
+    if "connection" in msg or "refused" in msg or "timeout" in msg:
+        hints.append("Check that Ollama and TTS services are running (ollama serve)")
+    if "429" in msg or "rate limit" in msg:
+        hints.append("Rate limited — wait 30s and retry, or switch to a local provider")
+    if "model" in msg and ("not found" in msg or "does not exist" in msg):
+        hints.append("Model not found — run 'ollama pull &lt;model&gt;' to download it")
+    if "out of memory" in msg or "oom" in msg or "cuda" in msg:
+        hints.append("Out of memory — try a smaller model or reduce chunk_size in config")
+    if "api key" in msg or "authentication" in msg or "unauthorized" in msg:
+        hints.append("Authentication failed — check your API key in the config JSON")
+    if ("empty" in msg and "response" in msg) or "returned empty" in msg:
+        hints.append("LLM returned empty — try a larger model (3b+) or lower temperature")
+    if "parse" in msg or "literal_eval" in msg or "syntax" in msg:
+        hints.append("Transcript parsing failed — try a larger model for better structured output")
+    if "file not found" in msg or "no such file" in msg:
+        hints.append("File not found — re-upload the source document")
+    if "disk" in msg or "space" in msg or "no space" in msg:
+        hints.append("Disk space issue — free up storage and retry")
+    if not hints:
+        if step and step <= 2:
+            hints.append("LLM provider may be offline or overloaded — check service status")
+        elif step and step >= 4:
+            hints.append("TTS provider may be offline — check that Kokoro/TTS is running")
+    return hints[0] if hints else ""
+
+
+def _build_audio_metrics_html(audio_path: str | None) -> str:
+    """Compute and display audio quality metrics after generation."""
+    if not audio_path or not os.path.exists(audio_path):
+        return ""
+    try:
+        import numpy as np
+        import soundfile as sf
+        data, sr = sf.read(audio_path)
+        if data.ndim > 1:
+            data = data.mean(axis=1)
+        duration = len(data) / sr
+        file_size = os.path.getsize(audio_path)
+        peak = float(np.max(np.abs(data)))
+        rms = float(np.sqrt(np.mean(data ** 2)))
+        mins = int(duration // 60)
+        secs = int(duration % 60)
+        size_mb = file_size / (1024 * 1024)
+        return (
+            f'<div style="display:flex;gap:16px;flex-wrap:wrap;padding:6px 0;'
+            f'font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">'
+            f'<span>Duration: <b style="color:var(--neon-cyan)">{mins}:{secs:02d}</b></span>'
+            f'<span>Sample Rate: <b style="color:var(--neon-teal)">{sr/1000:.1f}kHz</b></span>'
+            f'<span>Size: <b style="color:var(--neon-teal)">{size_mb:.1f}MB</b></span>'
+            f'<span>Peak: <b style="color:var(--neon-teal)">{peak:.3f}</b></span>'
+            f'<span>RMS: <b style="color:var(--neon-teal)">{rms:.4f}</b></span>'
+            f'</div>'
+        )
+    except Exception as e:
+        _log.warning("Could not compute audio metrics: %s", e)
+        return ""
+
+
+def _build_temp_explainer_html(temp: float) -> str:
+    """Dynamic temperature description that updates as the slider moves."""
+    if temp is None:
+        temp = 0.7
+    temp = float(temp)
+    if temp <= 0.3:
+        desc, label = "Deterministic and focused. Best for factual summaries and technical content.", "PRECISE"
+        color = "var(--neon-cyan)"
+    elif temp <= 0.6:
+        desc, label = "Balanced and reliable. Good for professional podcasts and lectures.", "BALANCED"
+        color = "var(--neon-teal)"
+    elif temp <= 0.9:
+        desc, label = "Creative and varied. Ideal for casual conversations and storytelling.", "CREATIVE"
+        color = "var(--neon-pink)"
+    elif temp <= 1.3:
+        desc, label = "Highly creative with unexpected phrasing. Great for entertainment.", "WILD"
+        color = "#ff8844"
+    else:
+        desc, label = "Maximum randomness. Output may be incoherent — use with caution.", "CHAOTIC"
+        color = "var(--neon-red)"
+    return (
+        f'<div style="font-family:var(--font-mono);font-size:10px;padding:2px 0;color:var(--text-muted)">'
+        f'<span style="color:{color};font-weight:600">[{label}]</span> {desc}'
+        f'</div>'
+    )
+
+
+def _on_voice_preview(host_voice, cohost_voice, config_file):
+    """Generate a short voice sample using the configured TTS. Returns audio path."""
+    import json as _json
+    from local_notebooklm.config import base_config
+    from local_notebooklm.steps.helpers import set_provider, generate_speech
+
+    sample_text = "Hello, welcome to the show! Today we are going to explore some fascinating topics together."
+
+    if config_file is not None:
+        config_path = config_file.name if hasattr(config_file, 'name') else config_file
+        with open(config_path, 'r') as f:
+            config = _json.load(f)
+    else:
+        ollama_cfg = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "ollama_config.json",
+        )
+        if os.path.exists(ollama_cfg):
+            with open(ollama_cfg, 'r') as f:
+                config = _json.load(f)
+        else:
+            config = base_config
+
+    voice = (host_voice or "").strip() or config.get("Host-Speaker-Voice", "af_alloy")
+
+    try:
+        tts_client = set_provider(config=config["Text-To-Speech-Model"]["provider"])
+        import tempfile
+        audio_format = config.get("Text-To-Speech-Model", {}).get("audio_format", "wav")
+        tmp = tempfile.NamedTemporaryFile(
+            suffix=f".{audio_format}", prefix="voice_preview_", delete=False)
+        tmp.close()
+        out_base = tmp.name.rsplit(".", 1)[0]
+        result = generate_speech(
+            client=tts_client,
+            text=sample_text,
+            voice=voice,
+            model_name=config["Text-To-Speech-Model"]["model"],
+            response_format=audio_format,
+            output_path=out_base,
+        )
+        return result
+    except Exception as e:
+        _log.warning("Voice preview failed: %s", e)
+        return None
 
 
 def _post_generate(notebook_id):
@@ -1555,14 +1726,14 @@ def _empty_outputs():
 def _on_notebook_switch(notebook_id):
     """Load sources, results, and settings for the selected notebook.
 
-    Returns updates for (23 values):
+    Returns updates for (24 values):
       sources_display, source_selector, source_content_viewer,
       progress_display, audio_output, extracted_text,
       clean_text, audio_script, infographic_preview, infographic_download,
       png_preview, pptx_download,
       format, length, style, language, outputs_to_generate, output_dir,
       host_voice, cohost_voice, temperature,
-      log_viewer, history_display
+      log_viewer, history_display, speaker_personality
     """
     if not notebook_id:
         return (
@@ -1575,6 +1746,7 @@ def _on_notebook_switch(notebook_id):
             "",
             "", "", 0.7,
             "", "",
+            "",
         )
 
     _notebook_mgr.set_default_notebook_id(notebook_id)
@@ -1607,6 +1779,7 @@ def _on_notebook_switch(notebook_id):
         settings.get("temperature", 0.7),
         "",
         history_html,
+        settings.get("speaker_personality", ""),
     )
 
 
@@ -1711,7 +1884,7 @@ def _on_url_add(url, notebook_id):
 
 
 def _on_settings_change(notebook_id, fmt, length, style, lang, outputs,
-                        host_voice, cohost_voice, temperature):
+                        host_voice, cohost_voice, temperature, speaker_personality):
     """Silently save settings to notebook metadata."""
     if not notebook_id:
         return
@@ -1724,6 +1897,7 @@ def _on_settings_change(notebook_id, fmt, length, style, lang, outputs,
         "host_voice": host_voice or "",
         "cohost_voice": cohost_voice or "",
         "temperature": temperature if temperature is not None else 0.7,
+        "speaker_personality": speaker_personality or "",
     })
 
 
@@ -2084,6 +2258,18 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
             else:
                 system_prompts[sn] = None
 
+        # ── Speaker personality injection ──────────────────
+        full_preference = additional_preference or ""
+        if notebook_id:
+            nb_settings = _notebook_mgr.get_settings(notebook_id)
+            personality = nb_settings.get("speaker_personality", "")
+            if personality and personality.strip():
+                full_preference = (
+                    f"SPEAKER PERSONALITIES:\n{personality.strip()}\n\n"
+                    + full_preference
+                )
+        full_preference = full_preference.strip() or None
+
         current_step = 0
         cleaned_text_file = None
         transcript_file = None
@@ -2128,7 +2314,7 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
                 format_type=format_type,
                 length=length,
                 style=style,
-                preference_text=additional_preference if additional_preference else None,
+                preference_text=full_preference,
                 system_prompt=system_prompts["step2"],
             )
         else:
@@ -2195,6 +2381,7 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
                     )
                 except Exception as e:
                     _log.warning("Step 5 (infographic) failed (non-fatal): %s", e)
+            step_times.append(time.time() - step_start)
 
         # ── Collect results ──────────────────────────────────
         audio_path = None
@@ -2270,6 +2457,7 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
                 "duration_s": round(time.time() - gen_start, 1),
                 "status": "success",
                 "outputs": generated,
+                "step_times": [round(t, 1) for t in step_times],
             })
 
         yield (
@@ -2303,8 +2491,18 @@ def process_podcast(pdf_file, url_input, config_file, format_type, length, style
                 "error": str(e)[:200],
             })
 
+        diagnosis = _diagnose_error(e, _last_failed_step)
+        diag_html = ""
+        if diagnosis:
+            diag_html = (
+                f'<div style="margin-top:6px;padding:6px 10px;background:rgba(0,240,255,0.04);'
+                f'border-left:2px solid var(--neon-teal);font-family:var(--font-mono);'
+                f'font-size:11px;color:var(--neon-teal)">'
+                f'Suggestion: {diagnosis}</div>'
+            )
         yield _empty_result(
             _build_progress_html(0, 0, f"Step {_last_failed_step or '?'} failed: {e}")
+            + diag_html
             + f'\n<details><summary>Full traceback</summary><pre>{traceback.format_exc()}</pre></details>'
         )
 
@@ -2420,6 +2618,7 @@ def create_gradio_ui():
                         elem_id="audio-player",
                     )
                     waveform_display = gr.HTML(value="", elem_id="waveform-area")
+                    audio_metrics_display = gr.HTML(value="", elem_id="audio-metrics")
 
                 # Infographic preview
                 infographic_preview = gr.HTML(label="Infographic Preview")
@@ -2447,6 +2646,7 @@ def create_gradio_ui():
                         interactive=True,
                         info="Edit the script then click Re-generate Audio",
                     )
+                    script_stats_display = gr.HTML(value="", elem_id="script-stats")
                     with gr.Row():
                         btn_regen_audio = gr.Button(
                             "Re-generate Audio from Script",
@@ -2525,7 +2725,10 @@ def create_gradio_ui():
                         value=0.7,
                         step=0.1,
                         label="Creativity",
-                        info="Lower = precise, Higher = creative",
+                    )
+                    temp_explainer = gr.HTML(
+                        value=_build_temp_explainer_html(0.7),
+                        elem_id="temp-explainer",
                     )
 
                     # Generate + Stop buttons
@@ -2569,6 +2772,22 @@ def create_gradio_ui():
                             label="Co-Host Voice",
                             placeholder="e.g. af_sky+af_bella",
                             info="TTS voice ID for Speaker 2",
+                        )
+                        btn_voice_preview = gr.Button(
+                            "Preview Voice",
+                            variant="secondary",
+                            size="sm",
+                        )
+                        voice_preview_audio = gr.Audio(
+                            label="Voice Preview",
+                            type="filepath",
+                            visible=True,
+                        )
+                        speaker_personality = gr.Textbox(
+                            label="Speaker Personalities",
+                            placeholder="e.g. Speaker 1 is enthusiastic and uses analogies. Speaker 2 is skeptical and probing.",
+                            lines=3,
+                            info="Describe each speaker's personality to shape the conversation",
                         )
                         additional_preference = gr.Textbox(
                             label="Preferences",
@@ -2622,7 +2841,7 @@ def create_gradio_ui():
             png_preview, pptx_download,
             format_type, length, style, language, outputs_to_generate,
             output_dir, host_voice, cohost_voice, temperature_slider,
-            log_viewer, history_display,
+            log_viewer, history_display, speaker_personality,
         ]
 
         # ── Wiring — Notebook bar ─────────────────────────────
@@ -2697,12 +2916,12 @@ def create_gradio_ui():
         # ── Wiring — Auto-save settings on change ────────────
         for setting_component in [format_type, length, style, language,
                                   outputs_to_generate, host_voice, cohost_voice,
-                                  temperature_slider]:
+                                  temperature_slider, speaker_personality]:
             setting_component.change(
                 fn=_on_settings_change,
                 inputs=[notebook_selector, format_type, length, style, language,
                         outputs_to_generate, host_voice, cohost_voice,
-                        temperature_slider],
+                        temperature_slider, speaker_personality],
                 outputs=None,
                 show_progress="hidden",
             )
@@ -2820,12 +3039,42 @@ def create_gradio_ui():
             show_progress="hidden",
         )
 
-        # ── Wiring — Audio waveform on playback ───────────────
+        # ── Wiring — Audio waveform + metrics on playback ────
         audio_output.change(
             fn=lambda a: _build_waveform_html(a) if a else "",
             inputs=[audio_output],
             outputs=[waveform_display],
             show_progress="hidden",
+        )
+        audio_output.change(
+            fn=_build_audio_metrics_html,
+            inputs=[audio_output],
+            outputs=[audio_metrics_display],
+            show_progress="hidden",
+        )
+
+        # ── Wiring — Script word count + duration ────────────
+        audio_script.change(
+            fn=_build_script_stats_html,
+            inputs=[audio_script],
+            outputs=[script_stats_display],
+            show_progress="hidden",
+        )
+
+        # ── Wiring — Temperature explainer ───────────────────
+        temperature_slider.change(
+            fn=_build_temp_explainer_html,
+            inputs=[temperature_slider],
+            outputs=[temp_explainer],
+            show_progress="hidden",
+        )
+
+        # ── Wiring — Voice preview ───────────────────────────
+        btn_voice_preview.click(
+            fn=_on_voice_preview,
+            inputs=[host_voice, cohost_voice, config_file],
+            outputs=[voice_preview_audio],
+            show_progress="minimal",
         )
 
         # ── Restore notebook on page load / refresh ───────────
