@@ -143,15 +143,27 @@ def extract_text_from_docx(file_path: str, max_chars: int = 100000) -> str:
         doc = Document(file_path)
         parts = []
         total = 0
-        for para in doc.paragraphs:
-            text = para.text
+
+        def _add(text: str) -> bool:
+            nonlocal total
             if not text:
-                continue
+                return True
             if total + len(text) + 1 > max_chars:
                 parts.append(text[: max_chars - total])
-                break
+                return False
             parts.append(text)
             total += len(text) + 1
+            return True
+
+        for para in doc.paragraphs:
+            if not _add(para.text):
+                break
+
+        for table in doc.tables:
+            for row in table.rows:
+                cells = [c.text.strip() for c in row.cells if c.text.strip()]
+                if cells and not _add(" | ".join(cells)):
+                    break
 
         result = "\n".join(parts)
         logger.info(f"DOCX extraction complete. {len(result)} chars")
